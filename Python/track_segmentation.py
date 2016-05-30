@@ -56,6 +56,7 @@ def extract_features(audio_file, beats_file):
 def compute_context_windows(features):
     """
     Computes context windows from MLS features to be used as input to a CNN.
+
     :param features: MLS features
     :return: context windows in the form (n_windows, n_melbands, n_context)
     """

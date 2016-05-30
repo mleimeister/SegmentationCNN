@@ -40,6 +40,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     """
     Compute average Mel log spectrogram per beat given previously
     extracted beat times.
+
     :param filename: path to audio file
     :param beat_times: list of beat times in seconds
     :param mel_bands: number of Mel bands
@@ -76,6 +77,7 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     Extract Mel log spectrogram features from a folder of audio files given pre-analysed
     beat times and segment boundary annotations. Return lists of feautres, label vectors
     and training weights (due to label smearing around annotations).
+
     :param audio_files: list of audio files to process
     :param beats_folder: folder containing extracted beat times
     :param annotation_folder: folder containing segment boundary annotations
@@ -118,6 +120,7 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
 def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample=10000):
     """
     Normalize features to zero mean and unit variance per Mel band.
+
     :param features: features in the form (n_items, n_melbands, context_length)
     :param mean_vec: mean vector over bands (if None, it is computed from features)
     :param std_vec: standard deviation vector over bands (if None, it is computed from features)
@@ -152,6 +155,7 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
     Reads precomputed beat Mel spectrograms and slices them into context windows
     for CNN training. For the training set, subsampling is
     applied.
+
     :param feature_list: list of MLS features
     :param labels_list: list of label vectors
     :param is_training: if true, subsampling is applied
@@ -290,6 +294,7 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 def load_raw_features(file):
     """
     Loads precomputed raw features from .pickle file.
+
     :param file: pickle file
     :return: training and test features and labels
     """
@@ -308,10 +313,6 @@ if __name__ == "__main__":
     train_files = [train_frame.get_value(i, 0) for i in range(train_frame.shape[0])]
     test_files = [test_frame.get_value(i, 0) for i in range(test_frame.shape[0])]
 
-    # file_list = glob.glob(audio_folder_path + '*.wav')
-    # test_files = random.sample(file_list, int(0.1*len(file_list)))
-    # train_files = [f for f in file_list if f not in test_files]
-    #
     print("Extracting MLS features")
 
     train_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,

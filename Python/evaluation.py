@@ -22,7 +22,10 @@ f_measure_thresh = 1    # tolerance window in seconds
 def load_data(preds_file, file_lists):
     """
     Loads necessary data for evaluation.
-    :return:
+
+    :param preds_file: numpy file containing CNN predictions
+    :param file_lists: file list of test tracks
+    :return: predictions, test file list, test index per beat frame
     """
 
     # load predictions
@@ -39,8 +42,9 @@ def post_processing(preds_track):
     """
     Post processing of prediction probabilities, applies smoothing
     window and emphasizes beats by multiplying with running avarage.
-    :param preds:
-    :return:
+
+    :param preds_track: CNN predictions per beat
+    :return: post-processed predictions
     """
 
     # smoothing
