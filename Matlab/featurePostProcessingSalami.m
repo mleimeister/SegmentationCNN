@@ -11,7 +11,7 @@
 
 clear all;
 
-conf = SegmentationCNN_config();
+conf = segmentationCNN_config();
 tatsPerBeat = conf.tatsPerBeat;
 saveExt = conf.saveExt;
 logScalingFactor = conf.logScalingFactor;

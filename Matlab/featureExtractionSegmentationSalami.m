@@ -13,7 +13,7 @@ clear all;
 
 RandStream('mcg16807', 'Seed', 0);
 visualize = true;
-conf = SegmentationCNN_config();
+conf = segmentationCNN_config();
 
 % get files to process
 fileID = fopen('train_tracks.txt');

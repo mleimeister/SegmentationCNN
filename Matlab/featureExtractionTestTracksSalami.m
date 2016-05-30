@@ -11,7 +11,7 @@
 
 clear all;
 
-conf = SegmentationCNN_config();
+conf = segmentationCNN_config();
 
 conf.melFB = constructMelFilterbank(conf);
 

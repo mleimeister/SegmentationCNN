@@ -13,7 +13,7 @@
 
 clear all;
 
-conf = SegmentationCNN_config();
+conf = segmentationCNN_config();
 
 load(['../Data_matlab/cnnTestDataNormalized' saveExt '.mat'], 'test_y');
 load('../Data_matlab/filesTestTracksSalami.mat');
