@@ -1,4 +1,4 @@
-function conf = SegmentationCNN_config()
+function conf = segmentationCNN_config()
 % Configuration for training a convolutional neural network for
 % music boundary detection.
 

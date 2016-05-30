@@ -13,9 +13,11 @@
 
 clear all;
 
-load('../Data_matlab/cnnTestDataNormalizedSalamibeats_16bars_f57.mat', 'test_y');
+conf = SegmentationCNN_config();
+
+load(['../Data_matlab/cnnTestDataNormalized' saveExt '.mat'], 'test_y');
 load('../Data_matlab/filesTestTracksSalami.mat');
-load('../Data_matlab/predsTestTracksSalamibeats_16bars_CNN_f57.mat');
+load(['../Data_matlab/predsTestTracks' saveExt '.mat']);
 
 visualize = false;
 
