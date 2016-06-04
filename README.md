@@ -10,6 +10,14 @@ Some example outputs of the CNN with corresponding ground truth annotations can 
 ### TODO 
 This is work in progress! So far the feature extraction and evaluation was run in MATLAB, whereas for the CNN training, the Keras Python library was used. Evaluation is done on the beat level using the beat-level labels constructed from the ground truth annoations. For computing the f-Measure, the [Beat Tracking Evaluation Toolbox](https://code.soundsoftware.ac.uk/projects/beat-evaluation/) was used. Currently porting the feature extraction and evaluation to Python.
 
+### Requirements
+* [Keras](http://keras.io/)
+* [Tensorflow](https://www.tensorflow.org/) or [Theano](http://deeplearning.net/software/theano/)
+* [librosa] (https://github.com/librosa/librosa)
+* [mir_eval] (https://github.com/craffel/mir_eval)
+* [peakutils] (https://pypi.python.org/pypi/PeakUtils)
+* Numpy, Scipy, Matplotlib
+
 ### References
 
 [1] Karen Ullrich, Jan Schlüter and Thomas Grill: Boundary detection in music structure analysis using convolutional neural networks. ISMIR 2014. [pdf](http://www.ofai.at/~jan.schlueter/pubs/2014_ismir.pdf)
