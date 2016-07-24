@@ -92,11 +92,11 @@ def get_segment_times(audio_file, annotation_folder):
     try:
         label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
         t = pd.read_table(label_file, header=None)
-    except:
+    except IOError:
         try:
             label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
             t = pd.read_table(label_file, header=None)
-        except:
+        except IOError:
             return -1
 
     segment_times = t.ix[:, 0].values
