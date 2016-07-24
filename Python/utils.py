@@ -106,7 +106,7 @@ def get_segment_times(audio_file, annotation_folder):
 
 def get_beat_times(audio_file, beats_folder):
     """
-    Read segment start times from annotation file.
+    Read beat times from annotation file.
     :param audio_file: path to audio files
     :param beats_folder: folder with preanalysed beat times (in .beats.txt format per track)
     :return: beat times in seconds

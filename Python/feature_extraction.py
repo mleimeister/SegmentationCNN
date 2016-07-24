@@ -54,7 +54,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
 
-    mel_fb = librosa.filters.mel(sr=22050, n_fft=fft_size, n_mels=mel_bands, fmin=50, fmax=10000)
+    mel_fb = librosa.filters.mel(sr=22050, n_fft=fft_size, n_mels=mel_bands, fmin=50, fmax=10000, htk=True)
     s = np.sum(mel_fb, axis=1)
     mel_fb = np.divide(mel_fb, s[:, np.newaxis])
 

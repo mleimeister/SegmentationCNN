@@ -12,11 +12,11 @@ import pickle
 import peakutils
 import mir_eval
 
-predictions_path = '../Data/predsTestTracks.npy'
+predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
 beats_folder_path = '../Data/salami-data-public-master/beats/'
 annotations_folder_path = '../Data/salami-data-public-master/annotations/'
-f_measure_thresh = 1    # tolerance window in seconds
+f_measure_thresh = 3    # tolerance window in seconds
 
 
 def load_data(preds_file, file_lists):
@@ -86,7 +86,7 @@ if __name__ == "__main__":
         preds_track = post_processing(preds_track)
         peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1)
 
-        pred_times = beat_times[peak_loc]
+        pred_times = beat_times[peak_loc] - 1
 
         # compute f-measure
         f_score, p, r = mir_eval.onset.f_measure(segment_times, pred_times, window=f_measure_thresh)

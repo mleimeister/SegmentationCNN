@@ -26,7 +26,9 @@ context_length = 65
 
 
 def compute_cnn_predictions(features):
-
+    """
+    Apply pretrained CNN model to features and return predictions.
+    """
     model = build_model(num_mel_bands, context_length)
     model.load_weights(model_weights)
     model.compile(loss='binary_crossentropy', optimizer='sgd')
@@ -38,6 +40,12 @@ def compute_cnn_predictions(features):
 
 
 def extract_features(audio_file, beats_file):
+    """
+    Extracted log-scaled Mel spectrums max-pooled across beat times.
+    :param audio_file: filename of audio file
+    :param beats_file: file containing beat annotations
+    :return: extracted features, beat times
+    """
 
     t = pd.read_table(beats_file, header=None)
     beat_times = t.ix[:, 0].values
@@ -84,7 +92,10 @@ def compute_context_windows(features):
 
 
 def compute_segments_from_predictions(predictions, beat_times):
-
+    """
+    Computes the segment times from a prediction curve and the beat times
+    using peak picking.
+    """
     predictions = np.squeeze(predictions)
     predictions = post_processing(predictions)
     peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.05)

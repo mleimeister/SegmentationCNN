@@ -13,8 +13,12 @@ import pickle
 
 
 def visualize_predictions():
+    """
+    Visualize predictions resulting from a pretrained CNN model
+    on the test dataset.
+    """
 
-    preds = np.load('../Data/predsTestTracks.npy')
+    preds = np.load('../Data/predsTestTracks_100epochs_lr005.npy')
     train_features, train_labels, test_features, test_labels = load_raw_features('../Data/rawFeatures.pickle')
 
     data = np.load('../Data/testDataNormalized.npz')
@@ -43,6 +47,9 @@ def visualize_predictions():
 
 
 def visualize_training_data():
+    """
+    Visualize log Mel beat spectra of the training dataset.
+    """
 
     train_features, train_labels, test_features, test_labels = load_raw_features('../Data/rawFeatures.pickle')
 
@@ -65,7 +72,9 @@ def visualize_training_data():
 
 
 def visualize_test_data():
-
+    """
+    Visualize log Mel beat spectra of the test dataset.
+    """
     train_features, train_labels, test_features, test_labels = load_raw_features('../Data/rawFeatures.pickle')
 
     for features, labels in zip(test_features, test_labels):

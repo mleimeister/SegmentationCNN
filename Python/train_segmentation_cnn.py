@@ -11,7 +11,6 @@
 import numpy as np
 from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
-from keras.layers.normalization import BatchNormalization
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.callbacks import EarlyStopping
 from keras.optimizers import SGD
@@ -66,17 +65,14 @@ def build_model(img_rows, img_cols):
     model.add(Convolution2D(32, 6, 8, border_mode='valid',
                             input_shape=(1, img_rows, img_cols), init='he_normal'))
     model.add(Activation('relu'))
-    model.add(BatchNormalization())
     model.add(MaxPooling2D(pool_size=(5, 2)))
     model.add(Convolution2D(64, 4, 6, border_mode='valid', init='he_normal'))
     model.add(Activation('relu'))
-    model.add(BatchNormalization())
     model.add(MaxPooling2D(pool_size=(2, 2)))
     model.add(Dropout(0.5))
     model.add(Flatten())
     model.add(Dense(256, init='he_normal'))
     model.add(Activation('relu'))
-    model.add(BatchNormalization())
     model.add(Dropout(0.5))
     model.add(Dense(1))
     model.add(Activation('sigmoid'))
@@ -84,7 +80,7 @@ def build_model(img_rows, img_cols):
     return model
 
 
-def train_model(batch_size=128, nb_epoch=10, save_ext='_10_epochs_BN_lr_05', weights_file=None):
+def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
     """
     Trains a CNN model for music boundary detection (segmentation).
 
