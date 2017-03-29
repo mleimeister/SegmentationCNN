@@ -23,12 +23,12 @@ For the CNN training:
 * [Tensorflow](https://www.tensorflow.org/) or [Theano](http://deeplearning.net/software/theano/)
 
 Feature extraction in Python:
-* [librosa] (https://github.com/librosa/librosa)
+* [librosa](https://github.com/librosa/librosa)
 * Numpy, Scipy
 
 Evaluation:
-* [mir_eval] (https://github.com/craffel/mir_eval)
-* [peakutils] (https://pypi.python.org/pypi/PeakUtils)
+* [mir_eval](https://github.com/craffel/mir_eval)
+* [peakutils](https://pypi.python.org/pypi/PeakUtils)
 * Matplotlib
 
 
