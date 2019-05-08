@@ -3,7 +3,7 @@
 ### Method
 Convolutional neural networks (CNN) for music segmentation. Similar than in [1], a log-scaled Mel spectrogram is extracted from the audio signal, with the difference that input spectrograms are max pooled across beat times. Beat tracking was done using the [MADMOM toolbox] (https://github.com/CPJKU/madmom) with the DBN beat tracking algorithm from [2]. Context windows of 16 bars are then classified by a CNN to determine whether the central beat is a segment boundary. The CNN training was implemented using [Keras](http://keras.io/).
 
-On the 'Internet Archive' portion of the [SALAMI](https://ddmal.music.mcgill.ca/research/salami/annotations) dataset it achieves a boundary detection f-Measure of 59% at a tolerance of 2 beats for a random 0.9/0.1 split. Some audio files did not have a corresponding annotation and were discarded.
+On the 'Internet Archive' portion of the [SALAMI](http://ddmal.music.mcgill.ca/research/salami/annotations) dataset it achieves a boundary detection f-Measure of 59% at a tolerance of 2 beats for a random 0.9/0.1 split. Some audio files did not have a corresponding annotation and were discarded.
 
 An example of a beat-wise log Mel spectrogram
 ![alt text](https://github.com/mleimeister/SegmentationCNN/blob/master/Results/1279_spec.png "")
