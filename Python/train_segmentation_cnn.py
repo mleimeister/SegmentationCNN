@@ -90,12 +90,13 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     :param weights_file: path to file with pretrained weights for continueing training
     """
 
-    print 'loading training data...'
+    print('loading training data...')
     X_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
 
-    print 'training data size:'
-    print X_train.shape
+    print('training data size:')
+    print(X_train.shape)
 
+    breakpoint()
     p = np.random.permutation(X_train.shape[0])
     X_train = X_train[p, :, :]
     y_train = y_train[p]
@@ -121,15 +122,15 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     model.fit(X_train, y_train, batch_size=batch_size, nb_epoch=nb_epoch, shuffle=True,
               verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[early_stopping])
 
-    print 'load test data...'
+    print('load test data...')
     X_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
     X_test = X_test.astype('float32')
     X_test = np.expand_dims(X_test, 1)
 
-    print 'predict test data...'
+    print('predict test data...')
     preds = model.predict_proba(X_test, batch_size=1, verbose=1)
 
-    print 'saving results...'
+    print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
     score = model.evaluate(X_test, y_test, show_accuracy=False, verbose=0)
