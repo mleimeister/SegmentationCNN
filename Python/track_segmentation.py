@@ -34,7 +34,6 @@ def compute_cnn_predictions(features):
     model.compile(loss='binary_crossentropy', optimizer='sgd')
 
     features = np.expand_dims(features, 3)
-    breakpoint()
     predictions = model.predict(features, batch_size=1)
 
     return predictions
@@ -52,6 +51,7 @@ def extract_features(audio_file, beats_file):
     beat_times = t.iloc[:, 0].values
 
     beat_mls = compute_beat_mls(filename=audio_file, beat_times=beat_times)
+    beat_mls /= np.max(beat_mls)
     features = compute_context_windows(beat_mls)
 
     norm_data = np.load(normalization_path)
@@ -126,7 +126,6 @@ if __name__ == "__main__":
         print("Extracting beat times (this might take a while)...")
         os.system('DBNBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
 
-    breakpoint()
     print("Computing features")
     mls_features, beat_times = extract_features(audio_file, out_dir + file_name + '.beats.txt')
 
