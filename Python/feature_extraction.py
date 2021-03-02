@@ -61,11 +61,11 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     mel_spec = np.dot(mel_fb, spec)
     mel_spec = np.log10(1. + 1000. * mel_spec)
 
-    beat_frames = np.round(beat_times * (22050. / hop_size))
+    beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
 
     beat_melspec = np.max(mel_spec[:, beat_frames[0]:beat_frames[1]], axis=1)
 
-    for k in xrange(1, beat_frames.shape[0]-1):
+    for k in range(1, beat_frames.shape[0]-1):
         beat_melspec = np.column_stack((beat_melspec,
                                         np.max(mel_spec[:, beat_frames[k]:beat_frames[k+1]], axis=1)))
 
@@ -100,9 +100,9 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
         label_vec = np.zeros(beat_mls.shape[1],)
         segment_times = get_segment_times(f, annotation_folder)
 
-        if segment_times is -1:
+        if isinstance(segment_times, int):
             failed_tracks_idx.append(i)
-            print("Extraction failed - no annotation found")
+            print("Extraction failed - no annotation found for " + f)
             continue
 
         for segment_start in segment_times:
@@ -130,7 +130,7 @@ def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample
 
     if mean_vec is None:
         # subsample features
-        idx = random.sample(xrange(features.shape[0]), min(features.shape[0], subsample))
+        idx = random.sample(range(features.shape[0]), min(features.shape[0], subsample))
         temp_features = features[idx, :, :]
 
         # swap axes to (items, frames, bands)
@@ -172,6 +172,7 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
     feature_count = 0
     current_track = 0
+    padding_length = int(context_length / 2)
 
     for features, labels in zip(feature_list, labels_list):
 
@@ -179,21 +180,21 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
         num_beats = features.shape[1]
 
-        features = np.hstack((0.001 * np.random.rand(num_mel_bands, context_length/2), features,
-                             0.001 * np.random.rand(num_mel_bands, context_length/2)))
+        features = np.hstack((0.001 * np.random.rand(num_mel_bands, padding_length), features,
+                             0.001 * np.random.rand(num_mel_bands, padding_length)))
 
-        labels = np.concatenate((np.zeros(context_length/2), labels, np.zeros(context_length/2)), axis=0)
+        labels = np.concatenate((np.zeros(padding_length), labels, np.zeros(padding_length)), axis=0)
 
         if is_training is True:
 
             # take all positive frames
             positive_frames_idx = np.where(labels == 1)[0]
 
-            for rep in xrange(pos_frames_oversample):
+            for rep in range(pos_frames_oversample):
 
                 for k in positive_frames_idx:
 
-                    next_window = features[:, k-context_length/2: k+context_length/2+1]
+                    next_window = features[:, k - padding_length: k + padding_length + 1]
                     next_label = 1
                     next_weight = 1
 
@@ -205,11 +206,11 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
                     feature_count += 1
 
                     # apply label smearing: set labels around annotation to 1 and give them a triangular weight
-                    for l in xrange(k - label_smearing, k + label_smearing + 1):
+                    for l in range(k - label_smearing, k + label_smearing + 1):
 
-                        if context_length/2 <= l < num_beats - context_length/2 and l != k:
+                        if padding_length <= l < num_beats - padding_length and l != k:
 
-                            next_window = features[:, l-context_length/2: l+context_length/2+1]
+                            next_window = features[:, l-padding_length: l+padding_length+1]
                             next_label = 1
                             next_weight = 1. - np.abs(l-k) / (label_smearing + 1.)
 
@@ -222,16 +223,16 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
             # take all frames in the middle between two boundaries (typical false positives)
             mid_segment_frames_idx = (positive_frames_idx[1:] + positive_frames_idx[:-1]) / 2
+            mid_segment_frames_idx = mid_segment_frames_idx.astype('int')
 
-            for rep in xrange(mid_frames_oversample):
+            for rep in range(mid_frames_oversample):
 
                 for k in mid_segment_frames_idx:
+                    for l in range(k - label_smearing, k + label_smearing + 1):
 
-                    for l in xrange(k - label_smearing, k + label_smearing + 1):
+                        if padding_length <= l < num_beats - padding_length:
 
-                        if context_length/2 <= l < num_beats - context_length/2:
-
-                            next_window = features[:, l-context_length/2: l+context_length/2+1]
+                            next_window = features[:, l-padding_length: l+padding_length+1]
                             next_label = 0
                             next_weight = 1
 
@@ -246,13 +247,13 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
             remaining_frames_idx = [i for i in range(num_beats) if (i not in positive_frames_idx)]
             num_neg_frames = neg_frames_factor * len(positive_frames_idx) * (1 + 2 * label_smearing)
 
-            for k in xrange(num_neg_frames):
+            for k in range(num_neg_frames):
 
                 next_idx = random.sample(remaining_frames_idx, 1)[0]
 
-                if context_length/2 <= next_idx < num_beats - context_length/2:
+                if context_length/2 <= next_idx < num_beats - padding_length:
 
-                    next_window = features[:, next_idx-context_length/2: next_idx+context_length/2+1]
+                    next_window = features[:, next_idx-padding_length: next_idx+padding_length+1]
                     next_label = 0
                     next_weight = 1
 
@@ -265,9 +266,9 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
         else:   # test data -> extract all context windows and keep track of track indices
 
-            for k in xrange(context_length/2, num_beats-context_length/2):
+            for k in range(padding_length, num_beats-padding_length):
 
-                next_window = features[:, k-context_length/2: k+context_length/2+1]
+                next_window = features[:, k-padding_length: k+padding_length+1]
                 next_label = labels[k]
                 next_weight = 1
 
@@ -310,8 +311,8 @@ if __name__ == "__main__":
     train_frame = pd.read_csv('../Data/train_tracks.txt', header=None)
     test_frame = pd.read_csv('../Data/test_tracks.txt', header=None)
 
-    train_files = [train_frame.get_value(i, 0) for i in range(train_frame.shape[0])]
-    test_files = [test_frame.get_value(i, 0) for i in range(test_frame.shape[0])]
+    train_files = [train_frame.at[i, 0] for i in range(train_frame.shape[0])]
+    test_files = [test_frame.at[i, 0] for i in range(test_frame.shape[0])]
 
     print("Extracting MLS features")
 

@@ -99,7 +99,7 @@ def get_segment_times(audio_file, annotation_folder):
         except IOError:
             return -1
 
-    segment_times = t.ix[:, 0].values
+    segment_times = t.iloc[:, 0].values
 
     return segment_times
 
@@ -115,6 +115,6 @@ def get_beat_times(audio_file, beats_folder):
     file_name = os.path.splitext(os.path.basename(audio_file))[0]
     beats_file = os.path.join(beats_folder, file_name + '.beats.txt')
     t = pd.read_table(beats_file, header=None)
-    beat_times = t.ix[:, 0].values
+    beat_times = t.iloc[:, 0].values
 
     return beat_times
