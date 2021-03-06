@@ -14,8 +14,8 @@ import mir_eval
 
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
-beats_folder_path = '../Data/salami-data-public-master/beats/'
-annotations_folder_path = '../Data/salami-data-public-master/annotations/'
+beats_folder_path = '../Audio/beats'
+annotations_folder_path = '../Data/salami-data-public/annotations/'
 f_measure_thresh = 3    # tolerance window in seconds
 
 
