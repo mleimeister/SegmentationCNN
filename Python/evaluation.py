@@ -11,11 +11,10 @@ from feature_extraction import get_segment_times, get_beat_times
 import pickle
 import peakutils
 import mir_eval
+import paths
 
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
-beats_folder_path = '../Audio/beats'
-annotations_folder_path = '../Data/salami-data-public/annotations/'
 f_measure_thresh = 3    # tolerance window in seconds
 
 
@@ -74,10 +73,10 @@ if __name__ == "__main__":
         print("Evaluating {}".format(f))
 
         # load annotations
-        segment_times = get_segment_times(f, annotations_folder_path)
+        segment_times = get_segment_times(f, paths.annotations_path)
 
         # get beat times
-        beat_times = get_beat_times(f, beats_folder_path)
+        beat_times = get_beat_times(f, paths.beats_path)
 
         # get predictions for current track
         preds_track = np.squeeze(np.asarray(preds[test_idx == i]))

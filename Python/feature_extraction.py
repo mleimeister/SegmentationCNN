@@ -19,12 +19,10 @@
 import librosa
 import random
 import pickle
+import paths
 from utils import *
 import scipy
 
-audio_folder_path = '../Audio'
-beats_folder_path = '../Audio/downbeats'
-annotations_folder_path = '../Data/salami-data-public/annotations/'
 context_length = 65         # how many beats make up a context window for the CNN
 num_mel_bands = 80          # number of Mel bands
 neg_frames_factor = 5       # how many more negative examples than segment boundaries
@@ -49,7 +47,13 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :return: beat Mel spectrogram (mel_bands x frames)
     """
 
-    y, sr = librosa.load(os.path.join(audio_folder_path, filename), sr=22050, mono=True)
+    computed_mls_file = paths.mls_path(filename)
+
+    if os.path.exists(computed_mls_file):
+        return np.load(computed_mls_file)
+
+
+    y, sr = librosa.load(os.path.join(paths.audio_path, filename), sr=22050, mono=True)
 
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
@@ -69,6 +73,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
         beat_melspec = np.column_stack((beat_melspec,
                                         np.max(mel_spec[:, beat_frames[k]:beat_frames[k+1]], axis=1)))
 
+    np.save(computed_mls_file, beat_melspec)
     return beat_melspec
 
 
@@ -92,13 +97,13 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
 
         print("Track {} / {}".format(i, len(audio_files)))
 
-        beat_times = get_beat_times(f, beats_folder)
+        beat_times = get_beat_times(f, paths.beats_path)
 
         beat_mls = compute_beat_mls(f, beat_times)
         beat_mls /= np.max(beat_mls)
 
         label_vec = np.zeros(beat_mls.shape[1],)
-        segment_times = get_segment_times(f, annotation_folder)
+        segment_times = get_segment_times(f, paths.annotations_path)
 
         if isinstance(segment_times, int):
             failed_tracks_idx.append(i)
@@ -317,12 +322,12 @@ if __name__ == "__main__":
     print("Extracting MLS features")
 
     train_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,
-                                                                                  beats_folder_path,
-                                                                                  annotations_folder_path)
+                                                                                  paths.beats_path,
+                                                                                  paths.annotations_path)
 
     test_features, test_labels, test_failed_idx = batch_extract_mls_and_labels(test_files,
-                                                                               beats_folder_path,
-                                                                               annotations_folder_path)
+                                                                               paths.beats_path,
+                                                                               paths.annotations_path)
 
     print("Extracted features for {} training and {} test tracks".format(len(train_features), len(test_features)))
 
