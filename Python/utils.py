@@ -89,20 +89,39 @@ def get_segment_times(audio_file, annotation_folder):
 
     # for some tracks, only one annotation is available, take first one as default
     # if there is no annotation available, store -1 as error code
+
     try:
-        label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
+        label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile3_uppercase.txt')
         t = pd.read_table(label_file, header=None)
     except IOError:
         try:
-            label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
+            label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
             t = pd.read_table(label_file, header=None)
         except IOError:
-            return -1
+            try:
+                label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
+                t = pd.read_table(label_file, header=None)
+            except IOError:
+                return -1
 
     segment_times = t.iloc[:, 0].values
 
     return segment_times
 
+def get_downbeat_times(audio_file, beats_folder):
+    """
+    Read beat times from annotation file, only providing beats detected as "the one"
+    :param audio_file: path to audio files
+    :param beats_folder: folder with preanalysed beat times (in .beats.txt format per track)
+    :return: beat times in seconds
+    """
+
+    file_name = os.path.splitext(os.path.basename(audio_file))[0]
+    beats_file = os.path.join(beats_folder, file_name + '.beats.txt')
+    t = pd.read_table(beats_file, header=None)
+
+    beat_times = t.iloc[:, 0].values
+    return np.array([v[0] for v in t.values if v[1] == 1])
 
 def get_beat_times(audio_file, beats_folder):
     """
