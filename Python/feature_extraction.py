@@ -53,7 +53,11 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
         return np.load(computed_mls_file)
 
 
-    y, sr = librosa.load(os.path.join(paths.audio_path, filename), sr=22050, mono=True)
+    if "/" in filename:
+        path = filename
+    else:
+        path = os.path.join(paths.audio_path, filename)
+    y, sr = librosa.load(path, sr=22050, mono=True)
 
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
