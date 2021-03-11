@@ -47,7 +47,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :return: beat Mel spectrogram (mel_bands x frames)
     """
 
-    computed_mls_file = paths.mls_path(filename)
+    computed_mls_file = paths.get_mls_path(filename)
 
     if os.path.exists(computed_mls_file):
         return np.load(computed_mls_file)
