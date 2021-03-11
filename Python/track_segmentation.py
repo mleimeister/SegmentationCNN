@@ -23,6 +23,7 @@ model_weights = '../Data/model_weights_100epochs_lr005.h5'
 out_dir = '../Temp/'
 num_mel_bands = 80
 context_length = 65
+padding = int(context_length / 2)
 
 
 def compute_cnn_predictions(features):
@@ -72,13 +73,15 @@ def compute_context_windows(features):
 
     n_preallocate = 10000
 
+    features = np.hstack((0.001 * np.random.rand(num_mel_bands, padding), features,
+                         0.001 * np.random.rand(num_mel_bands, padding)))
+
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
 
     feature_count = 0
     num_beats = features.shape[1]
 
-    padding = int(context_length / 2)
     for k in range(padding, num_beats-padding):
 
         if feature_count > n_preallocate:
@@ -93,15 +96,33 @@ def compute_context_windows(features):
     return data_x
 
 
+def print_predictions(p):
+    for i in range(len(p)):
+        if p[i] > 0.05:
+            print("%i:\t%.3f" % (i, p[i]))
+
+
 def compute_segments_from_predictions(predictions, beat_times):
     """
     Computes the segment times from a prediction curve and the beat times
     using peak picking.
     """
     predictions = np.squeeze(predictions)
+
+    print("raw predicitions:")
+    print_predictions(predictions)
+
     predictions = post_processing(predictions)
+
+    print("after post-processing:")
+    print_predictions(predictions)
+
     peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.05)
     segment_times = beat_times[peak_loc]
+
+    print("beat_num\ttime:")
+    for i in peak_loc:
+        print("%i\t%.2f" % (i, beat_times[i]))
 
     return segment_times
 
@@ -134,6 +155,10 @@ if __name__ == "__main__":
 
     print("Get segment times")
     segment_times = compute_segments_from_predictions(predictions, beat_times)
+
+    print("\n")
+    for f in segment_times:
+        print(f)
 
     print("The result has been stored in " + output_file)
     np.savetxt(output_file, segment_times, fmt='%4.2f', delimiter='\n')
