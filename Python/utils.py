@@ -123,6 +123,7 @@ def get_downbeat_times(audio_file, beats_folder):
     beat_times = t.iloc[:, 0].values
     return np.array([v[0] for v in t.values if v[1] == 1])
 
+
 def get_beat_times(audio_file, beats_folder):
     """
     Read beat times from annotation file.
@@ -133,6 +134,11 @@ def get_beat_times(audio_file, beats_folder):
 
     file_name = os.path.splitext(os.path.basename(audio_file))[0]
     beats_file = os.path.join(beats_folder, file_name + '.beats.txt')
+
+    if not os.path.isfile(beats_file):
+        print(f"Extracting beat times for {audio_file}")
+        os.system(f"DBNBeatTracker single '{audio_file}' -o '{beats_file}'")
+
     t = pd.read_table(beats_file, header=None)
     beat_times = t.iloc[:, 0].values
 
