@@ -104,6 +104,9 @@ def get_segment_times(audio_file, annotation_folder):
             except IOError:
                 return -1
 
+    if t[1].dtype == 'O':
+        t = t[~(t[1].str.lower().isin(['silence', 'end']))]
+
     segment_times = t.iloc[:, 0].values
 
     return segment_times
