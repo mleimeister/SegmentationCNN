@@ -96,10 +96,10 @@ def compute_context_windows(features):
     return data_x
 
 
-def print_predictions(p):
+def print_predictions(p, beat_times):
     for i in range(len(p)):
         if p[i] > 0.05:
-            print("%i:\t%.3f" % (i, p[i]))
+            print("%i:\t%.3f\t%.1f" % (i, p[i], beat_times[i]))
 
 
 def compute_segments_from_predictions(predictions, beat_times):
@@ -110,12 +110,12 @@ def compute_segments_from_predictions(predictions, beat_times):
     predictions = np.squeeze(predictions)
 
     print("raw predicitions:")
-    print_predictions(predictions)
+    print_predictions(predictions, beat_times)
 
     predictions = post_processing(predictions)
 
     print("after post-processing:")
-    print_predictions(predictions)
+    print_predictions(predictions, beat_times)
 
     peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.05)
     segment_times = beat_times[peak_loc]

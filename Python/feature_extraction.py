@@ -86,7 +86,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
 
 
 def compute_features(logger, f, i, audio_files):
-    logger.info("Track {} / {}".format(i, len(audio_files)))
+    logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
 
     beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
 

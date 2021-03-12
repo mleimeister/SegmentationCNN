@@ -88,7 +88,7 @@ if __name__ == "__main__":
         pred_times = beat_times[peak_loc] - 1
 
         # compute f-measure
-        f_score, p, r = mir_eval.onset.f_measure(segment_times, pred_times, window=f_measure_thresh)
+        f_score, p, r = mir_eval.onset.f_measure(np.sort(segment_times), np.sort(pred_times), window=f_measure_thresh)
 
         f_measures.append(f_score)
         precisions.append(p)
