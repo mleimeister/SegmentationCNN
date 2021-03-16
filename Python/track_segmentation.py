@@ -23,6 +23,7 @@ model_weights = '../Data/model_weights_100epochs_lr005.h5'
 out_dir = '../Temp/'
 num_mel_bands = 80
 context_length = 65
+padding = int(context_length / 2)
 
 
 def compute_cnn_predictions(features):
@@ -72,13 +73,15 @@ def compute_context_windows(features):
 
     n_preallocate = 10000
 
+    features = np.hstack((0.001 * np.random.rand(num_mel_bands, padding), features,
+                         0.001 * np.random.rand(num_mel_bands, padding)))
+
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
 
     feature_count = 0
     num_beats = features.shape[1]
 
-    padding = int(context_length / 2)
     for k in range(padding, num_beats-padding):
 
         if feature_count > n_preallocate:
