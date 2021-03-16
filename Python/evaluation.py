@@ -88,9 +88,6 @@ if __name__ == "__main__":
 
         pred_times = beat_times[peak_loc] - 1
 
-        if f == "992.mp3":
-            breakpoint()
-
         # compute f-measure
         f_score, p, r = mir_eval.onset.f_measure(segment_times, pred_times, window=f_measure_thresh)
 
