@@ -19,12 +19,11 @@
 import librosa
 import random
 import pickle
+import paths
+
 from utils import *
 import scipy
 
-audio_folder_path = '../Audio'
-beats_folder_path = '../Audio'
-annotations_folder_path = '../Data/salami-data-public/annotations/'
 context_length = 65         # how many beats make up a context window for the CNN
 num_mel_bands = 80          # number of Mel bands
 neg_frames_factor = 5       # how many more negative examples than segment boundaries
@@ -317,12 +316,12 @@ if __name__ == "__main__":
     print("Extracting MLS features")
 
     train_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,
-                                                                                  beats_folder_path,
-                                                                                  annotations_folder_path)
+                                                                                  paths.beats_path,
+                                                                                  paths.annotations_path)
 
     test_features, test_labels, test_failed_idx = batch_extract_mls_and_labels(test_files,
-                                                                               beats_folder_path,
-                                                                               annotations_folder_path)
+                                                                               paths.beats_path,
+                                                                               paths.annotations_path)
 
     print("Extracted features for {} training and {} test tracks".format(len(train_features), len(test_features)))
 
