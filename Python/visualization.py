@@ -8,8 +8,11 @@
 import numpy as np
 from feature_extraction import load_raw_features
 from evaluation import post_processing
+from utils import get_beat_times
 import matplotlib.pyplot as plt
 import pickle
+import paths
+import os
 
 
 def visualize_predictions():
@@ -31,19 +34,27 @@ def visualize_predictions():
     for i in range(len(test_labels)):
 
         f = test_files[i]
-        print f
+        beat_times, beat_numbers = get_beat_times(f, paths.beats_path, include_beat_numbers=True)
+        print(f)
 
         idx = np.where(test_idx == i)[0]
         labels = test_y[idx]
 
         preds_track = np.squeeze(np.asarray(preds[idx]))
-        preds_track = post_processing(preds_track)
+        processed_preds_track = post_processing(preds_track, beat_numbers)
+        with_downbeat_preds = post_processing(preds_track, beat_numbers, emphasize_downbeat=True)
+
         preds_track = 0.5 + 0.5 * preds_track
+        processed_preds_track = 1.0 + 0.5 * processed_preds_track
+        with_downbeat_preds = 1.5 + 0.5  * with_downbeat_preds
         labels *= 0.5
 
         plt.plot(labels)
         plt.plot(preds_track)
-        plt.show()
+        plt.plot(processed_preds_track)
+        plt.plot(with_downbeat_preds)
+        plt.savefig(os.path.join(paths.viz_path, paths.with_suffix(test_files[i], 'svg')), dpi=400)
+        plt.clf()
 
 
 def visualize_training_data():

@@ -48,7 +48,18 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :return: beat Mel spectrogram (mel_bands x frames)
     """
 
-    y, sr = librosa.load(os.path.join(audio_folder_path, filename), sr=22050, mono=True)
+    computed_mls_file = paths.get_mls_path(filename)
+
+    if os.path.exists(computed_mls_file):
+        return np.load(computed_mls_file)
+
+
+    if "/" in filename:
+        path = filename
+    else:
+        path = os.path.join(paths.audio_path, filename)
+
+    y, sr = librosa.load(path, sr=22050, mono=True)
 
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
@@ -72,6 +83,15 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     return beat_melspec
 
 
+def compute_features(logger, f, i, audio_files):
+    logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
+
+    beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
+
+    beat_mls = compute_beat_mls(f, beat_times)
+    beat_mls /= np.max(beat_mls)
+    return beat_mls, beat_times
+
 def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     """
     Extract Mel log spectrogram features from a folder of audio files given pre-analysed
@@ -88,31 +108,33 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     labels_list = []
     failed_tracks_idx = []
 
-    for i, f in enumerate(audio_files):
+    async_res = []
 
-        print("Track {} / {}".format(i, len(audio_files)))
+    logger = multiprocessing.log_to_stderr()
+    logger.setLevel(logging.INFO)
 
-        beat_times = get_beat_times(f, beats_folder)
+    with multiprocessing.Pool(processes=8) as pool:
+        #for i, f in enumerate(audio_files):
+        #    async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
 
-        beat_mls = compute_beat_mls(f, beat_times)
-        beat_mls /= np.max(beat_mls)
+        for i, f in enumerate(audio_files):
+            #beat_mls, beat_times = async_res[i].get()
+            beat_mls, beat_times = compute_features(logger, f, i , audio_files)
+            label_vec = np.zeros(beat_mls.shape[1],)
+            segment_times = get_segment_times(f, paths.annotations_path)
 
-        label_vec = np.zeros(beat_mls.shape[1],)
-        segment_times = get_segment_times(f, annotation_folder)
+            if isinstance(segment_times, int):
+                failed_tracks_idx.append(i)
+                print("Extraction failed - no annotation found for " + f)
+                continue
 
-        if isinstance(segment_times, int):
-            failed_tracks_idx.append(i)
-            print("Extraction failed - no annotation found for " + f)
-            continue
+            for segment_start in segment_times:
+                closest_beat = np.argmin(np.abs(beat_times - segment_start))
+                if closest_beat < len(label_vec):
+                    label_vec[closest_beat] = 1.
 
-        for segment_start in segment_times:
-
-            closest_beat = np.argmin(np.abs(beat_times - segment_start))
-            if closest_beat < len(label_vec):
-                label_vec[closest_beat] = 1.
-
-        feature_list.append(beat_mls)
-        labels_list.append(label_vec)
+            feature_list.append(beat_mls)
+            labels_list.append(label_vec)
 
     return feature_list, labels_list, failed_tracks_idx
 

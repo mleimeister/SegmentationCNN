@@ -8,10 +8,14 @@ import os
 audio_path = '../Audio'
 beats_path = '../Audio/beats'
 mls_path = '../Audio/features'
+viz_path = '../Audio/viz'
 annotations_path =  '../Data/salami-data-public/annotations/'
 
 def remove_suffix(filename):
      return os.path.splitext(os.path.basename(filename))[0]
+
+def with_suffix(path, ext):
+     return remove_suffix(path) + '.' + ext
 
 def get_mls_path(audio_filename):
      return os.path.join(mls_path, remove_suffix(audio_filename) + '.mls.npy')

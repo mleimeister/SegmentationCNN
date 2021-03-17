@@ -49,7 +49,8 @@ def extract_features(audio_file, beats_file):
     """
 
     t = pd.read_table(beats_file, header=None)
-    beat_times = t.iloc[:, 0].values
+    beat_times = t[0].values
+    beat_numbers = t[1].values
 
     beat_mls = compute_beat_mls(filename=audio_file, beat_times=beat_times)
     beat_mls /= np.max(beat_mls)
@@ -60,7 +61,7 @@ def extract_features(audio_file, beats_file):
     std_vec = norm_data['std_vec']
     features, mean_vec, std_vec = normalize_features_per_band(features, mean_vec, std_vec)
 
-    return features, beat_times
+    return features, beat_times, beat_numbers
 
 
 def compute_context_windows(features):
@@ -96,15 +97,33 @@ def compute_context_windows(features):
     return data_x
 
 
-def compute_segments_from_predictions(predictions, beat_times):
+def print_predictions(p, beat_times):
+    for i in range(len(p)):
+        print("%i:\t%.3f\t%.1f" % (i, p[i], beat_times[i]))
+
+
+def compute_segments_from_predictions(predictions, beat_times, beat_numbers):
     """
     Computes the segment times from a prediction curve and the beat times
     using peak picking.
     """
     predictions = np.squeeze(predictions)
-    predictions = post_processing(predictions)
-    peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.05)
+
+    breakpoint()
+    print("raw predicitions:")
+    print_predictions(predictions, beat_times)
+
+    predictions = post_processing(predictions, beat_numbers, emphasize_downbeat=True)
+
+    print("after post-processing:")
+    print_predictions(predictions, beat_times)
+
+    peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.1)
     segment_times = beat_times[peak_loc]
+
+    print("beat_num\ttime:")
+    for i in peak_loc:
+        print("%i\t%.2f" % (i, beat_times[i]))
 
     return segment_times
 
@@ -127,16 +146,20 @@ if __name__ == "__main__":
 
     if not os.path.isfile(out_dir + file_name + '.beats.txt'):
         print("Extracting beat times (this might take a while)...")
-        os.system('DBNBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
+        os.system('DBNDownBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
 
     print("Computing features")
-    mls_features, beat_times = extract_features(audio_file, out_dir + file_name + '.beats.txt')
+    mls_features, beat_times, beat_numbers = extract_features(audio_file, out_dir + file_name + '.beats.txt')
 
     print("Computing CNN predictions")
     predictions = compute_cnn_predictions(mls_features)
 
     print("Get segment times")
-    segment_times = compute_segments_from_predictions(predictions, beat_times)
+    segment_times = compute_segments_from_predictions(predictions, beat_times, beat_numbers)
+
+    print("\n")
+    for f in segment_times:
+        print(f)
 
     print("The result has been stored in " + output_file)
     np.savetxt(output_file, segment_times, fmt='%4.2f', delimiter='\n')

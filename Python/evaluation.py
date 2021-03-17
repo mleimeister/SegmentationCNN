@@ -37,10 +37,11 @@ def load_data(preds_file, file_lists):
     return preds, test_files, test_idx
 
 
-def post_processing(preds_track):
+def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
     """
     Post processing of prediction probabilities, applies smoothing
     window and emphasizes beats by multiplying with running avarage.
+    Also weights predictions towards beat "1".
 
     :param preds_track: CNN predictions per beat
     :return: post-processed predictions
@@ -52,6 +53,11 @@ def post_processing(preds_track):
     # emphasize peaks
     preds_track = np.multiply(preds_track,
                               np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
+
+
+    # emphasize downbeeat
+    if emphasize_downbeat:
+        preds_track = np.multiply(preds_track, np.where(beat_numbers == 1, 1, 0.5))
 
     # unit maximum
     preds_track /= np.max(preds_track)
@@ -76,19 +82,19 @@ if __name__ == "__main__":
         segment_times = get_segment_times(f, paths.annotations_path)
 
         # get beat times
-        beat_times = get_beat_times(f, beats_folder_path)
+        beat_times, beat_numbers = get_beat_times(f, paths.beats_path, include_beat_numbers=True)
 
         # get predictions for current track
         preds_track = np.squeeze(np.asarray(preds[test_idx == i]))
 
         # post processing
-        preds_track = post_processing(preds_track)
-        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1)
+        preds_track = post_processing(preds_track, beat_numbers)
+        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.2)
 
-        pred_times = beat_times[peak_loc] - 1
+        pred_times = beat_times[peak_loc]
 
         # compute f-measure
-        f_score, p, r = mir_eval.onset.f_measure(segment_times, pred_times, window=f_measure_thresh)
+        f_score, p, r = mir_eval.onset.f_measure(np.sort(segment_times), np.sort(pred_times), window=f_measure_thresh)
 
         f_measures.append(f_score)
         precisions.append(p)

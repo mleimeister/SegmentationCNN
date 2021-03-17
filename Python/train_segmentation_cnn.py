@@ -114,7 +114,7 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     sgd = SGD(lr=0.05, decay=1e-4, momentum=0.9, nesterov=True)
     model.compile(loss='binary_crossentropy', optimizer=sgd)
 
-    #early_stopping = EarlyStopping(monitor='val_loss', patience=5)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=5)
 
     print('train model...')
     model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
