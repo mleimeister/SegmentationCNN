@@ -15,7 +15,6 @@ import paths
 
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
-f_measure_thresh = 3    # tolerance window in seconds
 
 
 def load_data(preds_file, file_lists):
@@ -64,9 +63,7 @@ def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
 
     return preds_track
 
-
-if __name__ == "__main__":
-
+def run_eval(f_measure_thresh):
     f_measures = []
     precisions = []
     recalls = []
@@ -75,9 +72,6 @@ if __name__ == "__main__":
     preds = np.reshape(preds, len(preds))
 
     for i, f in enumerate(test_files):
-
-        print("Evaluating {}".format(f))
-
         # load annotations
         segment_times = get_segment_times(f, paths.annotations_path)
 
@@ -88,9 +82,9 @@ if __name__ == "__main__":
         preds_track = np.squeeze(np.asarray(preds[test_idx == i]))
 
         # post processing
-        preds_track = post_processing(preds_track, beat_numbers)
-        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.2)
-
+        preds_track = post_processing(preds_track, beat_numbers, emphasize_downbeat=False)
+        peds_track = np.insert(preds_track, 0, 0)
+        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1) - 1
         pred_times = beat_times[peak_loc]
 
         # compute f-measure
@@ -100,14 +94,15 @@ if __name__ == "__main__":
         precisions.append(p)
         recalls.append(r)
 
-        print("f-Measure: {}, precision: {}, recall: {}".format(f_score, p, r))
+        #print("{} f-Measure: {}, precision: {}, recall: {}".format(f, f_score, p, r))
 
     mean_f = np.mean(np.asarray(f_measures))
     mean_p = np.mean(np.asarray(precisions))
     mean_r = np.mean(np.asarray(recalls))
 
-    print(" ")
-    print("Mean scores across all test tracks:")
-    print("f-Measure: {}, precision: {}, recall: {}".format(mean_f, mean_p, mean_r))
+    print("mean f-Measure for {}: {}, precision: {}, recall: {}".format(f_measure_thresh, mean_f, mean_p, mean_r))
 
+if __name__ == "__main__":
+    run_eval(0.5)
+    run_eval(3.0)
 
