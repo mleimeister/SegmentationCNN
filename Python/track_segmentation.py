@@ -5,7 +5,7 @@
     beat-averaged log Mel spectrograms as input to the CNN.
 
     Usage:
-    python track_segmentation.py audio_file [output_file]
+    python3 track_segmentation.py audio_file [output_file]
 
     Copyright 2016 Matthias Leimeister
 """
@@ -130,7 +130,7 @@ def compute_segments_from_predictions(predictions, beat_times, beat_numbers):
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
-        print("Usage python track_segmentation.py audio_file [output_file]")
+        print("Usage python3 track_segmentation.py audio_file [output_file]")
         sys.exit(1)
 
     audio_file = sys.argv[1]
