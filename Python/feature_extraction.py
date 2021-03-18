@@ -21,6 +21,8 @@ import random
 import pickle
 import paths
 
+import multiprocessing, logging
+
 from utils import *
 import scipy
 
@@ -48,7 +50,18 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :return: beat Mel spectrogram (mel_bands x frames)
     """
 
-    y, sr = librosa.load(os.path.join(paths.audio_path, filename), sr=22050, mono=True)
+    computed_mls_file = paths.get_mls_path(filename)
+
+    if os.path.exists(computed_mls_file):
+        return np.load(computed_mls_file)
+
+
+    if "/" in filename:
+        path = filename
+    else:
+        path = os.path.join(paths.audio_path, filename)
+
+    y, sr = librosa.load(path, sr=22050, mono=True)
 
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
@@ -67,6 +80,8 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     for k in range(1, beat_frames.shape[0]-1):
         beat_melspec = np.column_stack((beat_melspec,
                                         np.max(mel_spec[:, beat_frames[k]:beat_frames[k+1]], axis=1)))
+
+    np.save(computed_mls_file, beat_melspec)
 
     return beat_melspec
 
