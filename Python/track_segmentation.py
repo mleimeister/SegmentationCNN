@@ -108,7 +108,6 @@ def compute_segments_from_predictions(predictions, beat_times, beat_numbers):
     """
     predictions = np.squeeze(predictions)
 
-    breakpoint()
     print("raw predicitions:")
     print_predictions(predictions, beat_times)
 
@@ -117,7 +116,8 @@ def compute_segments_from_predictions(predictions, beat_times, beat_numbers):
     print("after post-processing:")
     print_predictions(predictions, beat_times)
 
-    peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.1)
+    predictions = np.insert(predictions, 0, 0)
+    peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.1) - 1
     segment_times = beat_times[peak_loc]
 
     print("beat_num\ttime:")
