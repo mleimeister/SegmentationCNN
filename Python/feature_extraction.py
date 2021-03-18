@@ -78,11 +78,8 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     beat_melspec = np.max(mel_spec[:, beat_frames[0]:beat_frames[1]], axis=1)
 
     for k in range(1, beat_frames.shape[0]-1):
-        try:
-            beat_melspec = np.column_stack((beat_melspec,
-                                            np.max(mel_spec[:, beat_frames[k]:beat_frames[k+1]], axis=1)))
-        except:
-            breakpoint()
+        beat_melspec = np.column_stack((beat_melspec,
+            np.max(mel_spec[:, beat_frames[k]:beat_frames[k+1]], axis=1)))
 
     beat_melspec = np.column_stack((beat_melspec, mel_spec[:, beat_frames.shape[0]]))
 
@@ -127,7 +124,6 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
 
         for i, f in enumerate(audio_files):
             beat_mls, beat_times = async_res[i].get()
-            #beat_mls, beat_times = compute_features(logger, f, i , audio_files)
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
 
