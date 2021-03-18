@@ -85,6 +85,9 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
             breakpoint()
 
     beat_melspec = np.column_stack((beat_melspec, mel_spec[:, beat_frames.shape[0]]))
+
+    np.save(computed_mls_file, beat_melspec)
+
     return beat_melspec
 
 
