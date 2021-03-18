@@ -81,10 +81,9 @@ def compute_context_windows(features):
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
 
     feature_count = 0
-    num_beats = features.shape[1]
+    num_padded_features = features.shape[1]
 
-    for k in range(padding, num_beats-padding):
-
+    for k in range(padding, num_padded_features - padding):
         if feature_count > n_preallocate:
             break
 
