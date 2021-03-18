@@ -76,7 +76,7 @@ if __name__ == "__main__":
         segment_times = get_segment_times(f, paths.annotations_path)
 
         # get beat times
-        beat_times = get_beat_times(f, beats_folder_path)
+        beat_times = get_beat_times(f, paths.beats_path)
 
         # get predictions for current track
         preds_track = np.squeeze(np.asarray(preds[test_idx == i]))
