@@ -48,7 +48,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :return: beat Mel spectrogram (mel_bands x frames)
     """
 
-    y, sr = librosa.load(os.path.join(audio_folder_path, filename), sr=22050, mono=True)
+    y, sr = librosa.load(os.path.join(paths.audio_path, filename), sr=22050, mono=True)
 
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))

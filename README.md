@@ -35,7 +35,8 @@ After that the beat tracking from the MADMOM library can be run on all files wit
 
 ```bash
 cd ./Audio
-DBNBeatTracker batch -o ./ $(ls *.mp3)
+mkdir beats
+DBNBeatTracker batch -o ./beats $(ls *.mp3)
 ```
 
 This will take quite some time and use a lot of memory. After finishing, the beat files  (`*.beats.txt`) will be placed next to the audio files.
