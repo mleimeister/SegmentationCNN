@@ -62,16 +62,15 @@ def build_model(img_rows, img_cols):
 
     model = Sequential()
 
-    model.add(Convolution2D(32, 6, 8, border_mode='valid',
-                            input_shape=(1, img_rows, img_cols), init='he_normal'))
+    model.add(Convolution2D(32, (6, 8), input_shape=(img_rows, img_cols, 1)))
     model.add(Activation('relu'))
     model.add(MaxPooling2D(pool_size=(5, 2)))
-    model.add(Convolution2D(64, 4, 6, border_mode='valid', init='he_normal'))
+    model.add(Convolution2D(64, (4, 6)))
     model.add(Activation('relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
     model.add(Dropout(0.5))
     model.add(Flatten())
-    model.add(Dense(256, init='he_normal'))
+    model.add(Dense(256))
     model.add(Activation('relu'))
     model.add(Dropout(0.5))
     model.add(Dense(1))
@@ -90,11 +89,11 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     :param weights_file: path to file with pretrained weights for continueing training
     """
 
-    print 'loading training data...'
+    print('loading training data...')
     X_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
 
-    print 'training data size:'
-    print X_train.shape
+    print('training data size:')
+    print(X_train.shape)
 
     p = np.random.permutation(X_train.shape[0])
     X_train = X_train[p, :, :]
@@ -102,10 +101,10 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     w_train = w_train[p]
 
     X_train = X_train.astype('float32')
-    X_train = np.expand_dims(X_train, 1)
+    X_train = np.expand_dims(X_train, 3)
 
-    img_rows = X_train.shape[2]
-    img_cols = X_train.shape[3]
+    img_rows = X_train.shape[1]
+    img_cols = X_train.shape[2]
 
     model = build_model(img_rows, img_cols)
 
@@ -115,24 +114,24 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     sgd = SGD(lr=0.05, decay=1e-4, momentum=0.9, nesterov=True)
     model.compile(loss='binary_crossentropy', optimizer=sgd)
 
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5)
+    #early_stopping = EarlyStopping(monitor='val_loss', patience=5)
 
-    print 'train model...'
-    model.fit(X_train, y_train, batch_size=batch_size, nb_epoch=nb_epoch, shuffle=True,
-              verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[early_stopping])
+    print('train model...')
+    model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+              verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
 
-    print 'load test data...'
+    print('load test data...')
     X_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
     X_test = X_test.astype('float32')
-    X_test = np.expand_dims(X_test, 1)
+    X_test = np.expand_dims(X_test, 3)
 
-    print 'predict test data...'
-    preds = model.predict_proba(X_test, batch_size=1, verbose=1)
+    print('predict test data...')
+    preds = model.predict(X_test, batch_size=1, verbose=1)
 
-    print 'saving results...'
+    print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
-    score = model.evaluate(X_test, y_test, show_accuracy=False, verbose=0)
+    score = model.evaluate(X_test, y_test, verbose=1)
     print('Test score:', score)
 
     # save model

@@ -19,7 +19,7 @@ from train_segmentation_cnn import build_model
 import peakutils
 
 normalization_path = '../Data/normalization.npz'
-model_weights = '../Data/model_weights_100epochs.h5'
+model_weights = '../Data/model_weights_100epochs_lr005.h5'
 out_dir = '../Temp/'
 num_mel_bands = 80
 context_length = 65
@@ -33,8 +33,8 @@ def compute_cnn_predictions(features):
     model.load_weights(model_weights)
     model.compile(loss='binary_crossentropy', optimizer='sgd')
 
-    features = np.expand_dims(features, 1)
-    predictions = model.predict_proba(features, batch_size=1)
+    features = np.expand_dims(features, 3)
+    predictions = model.predict(features, batch_size=1)
 
     return predictions
 
@@ -48,9 +48,10 @@ def extract_features(audio_file, beats_file):
     """
 
     t = pd.read_table(beats_file, header=None)
-    beat_times = t.ix[:, 0].values
+    beat_times = t.iloc[:, 0].values
 
     beat_mls = compute_beat_mls(filename=audio_file, beat_times=beat_times)
+    beat_mls /= np.max(beat_mls)
     features = compute_context_windows(beat_mls)
 
     norm_data = np.load(normalization_path)
@@ -77,12 +78,13 @@ def compute_context_windows(features):
     feature_count = 0
     num_beats = features.shape[1]
 
-    for k in xrange(context_length/2, num_beats-context_length/2):
+    padding = int(context_length / 2)
+    for k in range(padding, num_beats-padding):
 
         if feature_count > n_preallocate:
             break
 
-        next_window = features[:, k-context_length/2: k+context_length/2+1]
+        next_window = features[:, k-padding: k+padding+1]
         data_x[feature_count, :, :] = next_window
         feature_count += 1
 
@@ -122,7 +124,7 @@ if __name__ == "__main__":
 
     if not os.path.isfile(out_dir + file_name + '.beats.txt'):
         print("Extracting beat times (this might take a while)...")
-        os.system('DBNBeatTracker \'single\' ' + audio_file + ' -o ' + out_dir + file_name + '.beats.txt')
+        os.system('DBNBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
 
     print("Computing features")
     mls_features, beat_times = extract_features(audio_file, out_dir + file_name + '.beats.txt')

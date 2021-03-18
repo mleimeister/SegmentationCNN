@@ -12,17 +12,17 @@ and corresponding prediction with ground truth segment annotations.
 
 Some more example outputs of the CNN with corresponding ground truth annotations can be found in the 'Results' subfolder (the nicer ones :)
 
-### TODO 
+### TODO
 This is work in progress! So far the feature extraction and evaluation was run in MATLAB, whereas for the CNN training, the Keras Python library was used. Evaluation is done on the beat level using the beat-level labels constructed from the ground truth annoations. For computing the f-Measure, the [Beat Tracking Evaluation Toolbox](https://code.soundsoftware.ac.uk/projects/beat-evaluation/) was used. Currently porting the feature extraction and evaluation to Python.
 
 ### Requirements
 
 For the CNN training:
 
-* [Keras](http://keras.io/)
-* [Tensorflow](https://www.tensorflow.org/) or [Theano](http://deeplearning.net/software/theano/)
+* [Keras](http://keras.io/) version 2.4.3
 
 Feature extraction in Python:
+* [Madmom](https://github.com/CPJKU/madmom)
 * [librosa](https://github.com/librosa/librosa)
 * Numpy, Scipy
 
