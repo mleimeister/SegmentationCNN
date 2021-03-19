@@ -20,6 +20,7 @@ import librosa
 import random
 import pickle
 import paths
+import warnings
 
 import multiprocessing, logging
 
@@ -61,7 +62,9 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     else:
         path = os.path.join(paths.audio_path, filename)
 
-    y, sr = librosa.load(path, sr=22050, mono=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        y, sr = librosa.load(path, sr=22050, mono=True)
 
     spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
