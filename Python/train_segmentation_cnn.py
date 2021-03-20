@@ -139,4 +139,4 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
 
 
 if __name__ == "__main__":
-    train_model(nb_epoch=300)
+    train_model(nb_epoch=75)

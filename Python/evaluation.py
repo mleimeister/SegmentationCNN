@@ -13,6 +13,8 @@ import peakutils
 import mir_eval
 import paths
 
+from operator import itemgetter
+
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
 
@@ -63,6 +65,10 @@ def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
 
     return preds_track
 
+def get_sort_key(item):
+    return item[1]
+
+
 def run_eval(f_measure_thresh):
     f_measures = []
     precisions = []
@@ -101,6 +107,21 @@ def run_eval(f_measure_thresh):
     mean_r = np.mean(np.asarray(recalls))
 
     print("mean f-Measure for {}: {}, precision: {}, recall: {}".format(f_measure_thresh, mean_f, mean_p, mean_r))
+
+    combined_tracks = list(zip(test_files, f_measures, precisions, recalls))
+    sorted_tracks = sorted(combined_tracks, key=get_sort_key)
+    print("worst:")
+    for x in range(3):
+        track = sorted_tracks[x]
+        print("{:<20}{:4.2}\t{:4.2}\t{:4.2}".format(*track))
+
+    print("best:")
+    for x in range(1,4):
+        track = sorted_tracks[-x]
+        print("{:<20}{:4.2}\t{:4.2}\t{:4.2}".format(*track))
+
+
+
 
 if __name__ == "__main__":
     run_eval(0.5)
