@@ -68,6 +68,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
         beat_melspec = np.column_stack((beat_melspec,
                                         np.max(mel_spec[:, beat_frames[k]:beat_frames[k+1]], axis=1)))
 
+    beat_melspec = np.column_stack((beat_melspec, mel_spec[:, beat_frames.shape[0]]))
     return beat_melspec
 
 
@@ -186,7 +187,7 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
         if is_training is True:
 
-            # take all positive frames
+            # take all positive frames.  these are indexes into the already padded features.
             positive_frames_idx = np.where(labels == 1)[0]
 
             for rep in range(pos_frames_oversample):
@@ -207,7 +208,8 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
                     # apply label smearing: set labels around annotation to 1 and give them a triangular weight
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
-                        if padding_length <= l < num_beats - padding_length and l != k:
+                        # don't smear into padding.
+                        if padding_length <= l < num_beats + padding_length and l != k:
 
                             next_window = features[:, l-padding_length: l+padding_length+1]
                             next_label = 1
@@ -229,43 +231,41 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
                 for k in mid_segment_frames_idx:
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
-                        if padding_length <= l < num_beats - padding_length:
+                        if padding_length <= l < num_beats + padding_length:
 
                             next_window = features[:, l-padding_length: l+padding_length+1]
-                            next_label = 0
-                            next_weight = 1
 
                             data_x[feature_count, :, :] = next_window
-                            data_y[feature_count] = next_label
-                            data_weight[feature_count] = next_weight
+                            data_y[feature_count] = 0
+                            data_weight[feature_count] = 1
                             track_idx[feature_count] = current_track
 
                             feature_count += 1
 
             # sample randomly from the remaining frames
-            remaining_frames_idx = [i for i in range(num_beats) if (i not in positive_frames_idx)]
+            remaining_frames_idx = []
+            for i in range(features.shape[1]):
+                if (i not in positive_frames_idx) and (padding_length <= i < features.shape[1] - padding_length):
+                    remaining_frames_idx.append(i)
+
             num_neg_frames = neg_frames_factor * len(positive_frames_idx) * (1 + 2 * label_smearing)
 
             for k in range(num_neg_frames):
-
                 next_idx = random.sample(remaining_frames_idx, 1)[0]
 
-                if context_length/2 <= next_idx < num_beats - padding_length:
+                next_window = features[:, next_idx-padding_length: next_idx+padding_length+1]
+                next_label = 0
+                next_weight = 1
 
-                    next_window = features[:, next_idx-padding_length: next_idx+padding_length+1]
-                    next_label = 0
-                    next_weight = 1
+                data_x[feature_count, :, :] = next_window
+                data_y[feature_count] = next_label
+                data_weight[feature_count] = next_weight
+                track_idx[feature_count] = current_track
 
-                    data_x[feature_count, :, :] = next_window
-                    data_y[feature_count] = next_label
-                    data_weight[feature_count] = next_weight
-                    track_idx[feature_count] = current_track
-
-                    feature_count += 1
+                feature_count += 1
 
         else:   # test data -> extract all context windows and keep track of track indices
-
-            for k in range(padding_length, num_beats-padding_length):
+            for k in range(padding_length, num_beats + padding_length):
 
                 next_window = features[:, k-padding_length: k+padding_length+1]
                 next_label = labels[k]
