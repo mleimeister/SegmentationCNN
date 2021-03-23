@@ -26,6 +26,9 @@ import multiprocessing, logging
 
 from utils import *
 import scipy
+import skimage.measure
+from scipy.spatial import distance
+
 
 context_length = 65         # how many beats make up a context window for the CNN
 num_mel_bands = 80          # number of Mel bands
@@ -33,12 +36,98 @@ neg_frames_factor = 5       # how many more negative examples than segment bound
 pos_frames_oversample = 5   # oversample positive frames because there are too few
 mid_frames_oversample = 3   # oversample frames between segments
 label_smearing = 1          # how many frames are positive examples around an annotation
+padding_length = int(context_length / 2)
+
+max_pool = 2
 
 random.seed(1234)           # for reproducibility
 np.random.seed(1234)
 
+def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+    """
+    Compute average Mel log spectrogram per beat given previously
+    extracted beat times.
 
-def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+    :param waveform: raw waveform data
+    :param beat_times: list of beat times in seconds
+    :param mel_bands: number of Mel bands
+    :param fft_size: FFT size
+    :param hop_size: hop size for FFT processing
+    :return: beat sslm
+    """
+    S = librosa.feature.melspectrogram(y=waveform, sr=22050, n_fft=fft_size, hop_length=hop_size, n_mels=mel_bands, fmin=80, fmax=16000, win_length=fft_size, window=scipy.signal.hamming)
+
+    S_to_dB = librosa.power_to_db(S,ref=np.max)
+
+    # pad 130 frames (to be 65) with noise at -70dB at the beginning
+    pad = np.full((S_to_dB.shape[0], context_length * 2), -70)
+    S_padded = np.concatenate((pad, S_to_dB), axis=1)
+
+    # downsample initial spectrogram
+    x_prime = skimage.measure.block_reduce(S_padded, (1,max_pool), np.max)
+
+    MFCCs = scipy.fftpack.dct(x_prime, axis=0, type=2, norm='ortho')
+    MFCCs = MFCCs[1:,:] + 1
+
+    # this seems to group two frames together
+    m = 2
+    x = [np.roll(MFCCs,n,axis=1) for n in range(m)]
+    x_hat = np.concatenate(x, axis=0)
+
+    #Cosine distance calculation: D[N/p,L/p] matrix
+    distances = np.zeros((x_hat.shape[1], context_length)) #D has as dimensions N/p and L/p
+    for i in range(x_hat.shape[1]): #iteration in columns of x_hat
+        for l in range(context_length):
+            if i-(l+1) < 0:
+                cosine_dist = 1
+            elif i-(l+1) < context_length:
+                cosine_dist = 1
+            else:
+                cosine_dist = distance.cosine(x_hat[:,i], x_hat[:,i-(l+1)]) #cosine distance between columns i and i-L
+            distances[i,l] = cosine_dist
+
+    #Threshold epsilon[N/p,L/p] calculation
+    kappa = 0.1 #equalization factor of 10%
+    epsilon = np.zeros((distances.shape[0], context_length)) #D has as dimensions N/p and L/p
+    for i in range(context_length, distances.shape[0]): #iteration in columns of x_hat
+        for l in range(context_length):
+            epsilon[i,l] = np.quantile(np.concatenate((distances[i-l,:], distances[i,:])), kappa)
+
+
+    #Removing initial padding now taking into account the max-poolin factor
+    distances = distances[context_length:,:]
+    epsilon = epsilon[context_length:,:]
+    x_prime = x_prime[:,context_length:]
+
+
+    #Self Similarity Lag Matrix
+    sslm = scipy.special.expit(1-distances/epsilon) #aplicación de la sigmoide
+    sslm = np.transpose(sslm)
+
+    # the paper further downsamples by 3, but since we're doing beat-frames only might be ok
+    #sslm = skimage.measure.block_reduce(sslm, (1,3), np.max)
+    #x_prime = skimage.measure.block_reduce(x_prime, (1,3), np.max)
+
+    #Check if SSLM has nans and if it has them, substitute them by 0
+    for i in range(sslm.shape[0]):
+        for j in range(sslm.shape[1]):
+            if np.isnan(sslm[i,j]):
+                sslm[i,j] = 0
+
+    beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
+    beat_sslms = np.zeros((65, 65, beat_frames.shape[0]))
+
+    for k in range(beat_frames.shape[0]):
+        sslm_frame = beat_frames[k] // max_pool
+        sslm_frame_min = sslm_frame - context_length // 2
+        sslm_frame_max = sslm_frame + context_length // 2 + 1
+        breakpoint()
+        beat_sslms[:,:,k] = sslm[:, sslm_frame_min : sslm_frame_max]
+
+    breakpoint()
+    return sslm
+
+def compute_beat_mls(features, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
     """
     Compute average Mel log spectrogram per beat given previously
     extracted beat times.
@@ -50,23 +139,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :param hop_size: hop size for FFT processing
     :return: beat Mel spectrogram (mel_bands x frames)
     """
-
-    computed_mls_file = paths.get_mls_path(filename)
-
-    if os.path.exists(computed_mls_file):
-        return np.load(computed_mls_file)
-
-
-    if "/" in filename:
-        path = filename
-    else:
-        path = os.path.join(paths.audio_path, filename)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        y, sr = librosa.load(path, sr=22050, mono=True)
-
-    spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
+    spec = np.abs(librosa.stft(y=features, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
 
     mel_fb = librosa.filters.mel(sr=22050, n_fft=fft_size, n_mels=mel_bands, fmin=50, fmax=10000, htk=True)
@@ -86,17 +159,41 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
 
     beat_melspec = np.column_stack((beat_melspec, mel_spec[:, beat_frames.shape[0]]))
 
-    np.save(computed_mls_file, beat_melspec)
-
     return beat_melspec
 
+def load_waveform(filename):
+    if "/" in filename:
+        path = filename
+    else:
+        path = os.path.join(paths.audio_path, filename)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        y, sr = librosa.load(path, sr=22050, mono=True)
+        return y
+
+def get_cached_features(filename):
+    computed_mls_file = paths.get_mls_path(filename)
+
+    if os.path.exists(computed_mls_file):
+        return np.load(computed_mls_file)
+    else:
+        return None
 
 def compute_features(logger, f, i, audio_files):
     logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
 
     beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
 
-    beat_mls = compute_beat_mls(f, beat_times)
+    cached_features = get_cached_features(f)
+
+    if cached_features is not None:
+        return cached_features
+
+    waveform = load_waveform(f)
+
+    beat_mls = compute_beat_mls(waveform, beat_times)
+    compute_sslm(waveform, beat_times)
     beat_mls /= np.max(beat_mls)
     return beat_mls, beat_times
 
@@ -122,11 +219,12 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     logger.setLevel(logging.INFO)
 
     with multiprocessing.Pool(processes=8) as pool:
-        for i, f in enumerate(audio_files):
-            async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
+        #for i, f in enumerate(audio_files):
+        #    async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
 
         for i, f in enumerate(audio_files):
-            beat_mls, beat_times = async_res[i].get()
+            #beat_mls, beat_times = async_res[i].get()
+            beat_mls, beat_times = compute_features(logger, f, i, audio_files)
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
 
@@ -201,7 +299,6 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
     feature_count = 0
     current_track = 0
-    padding_length = int(context_length / 2)
 
     for features, labels in zip(feature_list, labels_list):
 
