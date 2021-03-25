@@ -12,6 +12,14 @@ import numpy as np
 from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
+import tensorflow.keras.layers
+from tensorflow.keras.models import Model
+
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
 from keras.callbacks import EarlyStopping
 from keras.optimizers import SGD
 
@@ -32,10 +40,11 @@ def load_training_data(dataset):
 
     data = np.load(dataset)
     train_x = data['train_x']
+    train_sslm_x = data['train_sslm_x']
     train_y = data['train_y']
     train_weights = data['train_weights']
 
-    return train_x, train_y, train_weights
+    return train_x, train_sslm_x, train_y, train_weights
 
 
 def load_test_data(dataset):
@@ -52,10 +61,11 @@ def load_test_data(dataset):
 
     data = np.load(dataset)
     test_x = data['test_x']
+    test_sslm_x = data['test_sslm_x']
     test_y = data['test_y']
     test_weights = data['test_weights']
 
-    return test_x, test_y, test_weights
+    return test_x, test_sslm_x, test_y, test_weights
 
 
 def build_model(img_rows, img_cols):
@@ -78,6 +88,24 @@ def build_model(img_rows, img_cols):
 
     return model
 
+def build_sslm_model(img_rows, img_cols):
+
+    input = layers.Input(shape=(img_rows, img_cols, 1))
+    x = layers.Conv2D(16, (8, 8))(input)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D(pool_size=(6, 6))(x)
+    x = layers.Conv2D(64, (4, 4))(x)
+    x = layers.Activation('relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(256)(x)
+    x = layers.Activation('relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(1)(x)
+    x = layers.Activation('sigmoid')(x)
+    return Model(inputs = [input], outputs = x)
+
+
 
 def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
     """
@@ -90,23 +118,27 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     """
 
     print('loading training data...')
-    X_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
+    X_train, x_sslm_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
 
     print('training data size:')
     print(X_train.shape)
 
     p = np.random.permutation(X_train.shape[0])
     X_train = X_train[p, :, :]
+    x_sslm_train = x_sslm_train[p, :, :]
     y_train = y_train[p]
     w_train = w_train[p]
 
     X_train = X_train.astype('float32')
     X_train = np.expand_dims(X_train, 3)
+    x_sslm_train = np.expand_dims(x_sslm_train, 3)
 
     img_rows = X_train.shape[1]
     img_cols = X_train.shape[2]
 
-    model = build_model(img_rows, img_cols)
+    #model = build_model(img_rows, img_cols)
+    breakpoint()
+    model = build_sslm_model(x_sslm_train.shape[1], x_sslm_train.shape[2])
 
     if weights_file is not None:
         model.load_weights(weights_file)
@@ -117,21 +149,26 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     early_stopping = EarlyStopping(monitor='val_loss', patience=5)
 
     print('train model...')
-    model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+    model.fit(x_sslm_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
               verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
 
+    #model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+    #          verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
     print('load test data...')
-    X_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
+    X_test, x_sslm_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
     X_test = X_test.astype('float32')
     X_test = np.expand_dims(X_test, 3)
+    x_sslm_test = np.expand_dims(x_sslm_test, 3)
 
     print('predict test data...')
-    preds = model.predict(X_test, batch_size=1, verbose=1)
+    preds = model.predict(x_sslm_test, batch_size=1, verbose=1)
+    #preds = model.predict(X_test, batch_size=1, verbose=1)
 
     print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
-    score = model.evaluate(X_test, y_test, verbose=1)
+    score = model.evaluate(x_sslm_test, y_test, verbose=1)
+    #score = model.evaluate(X_test, y_test, verbose=1)
     print('Test score:', score)
 
     # save model
