@@ -69,42 +69,25 @@ def load_test_data(dataset):
 
 
 def build_model(img_rows, img_cols):
-
-    model = Sequential()
-
-    model.add(Convolution2D(32, (6, 8), input_shape=(img_rows, img_cols, 1)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(5, 2)))
-    model.add(Convolution2D(64, (4, 6)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.5))
-    model.add(Flatten())
-    model.add(Dense(256))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
-    model.add(Dense(1))
-    model.add(Activation('sigmoid'))
-
-    return model
+    input = layers.Input(shape=(img_rows, img_cols, 1))
+    x = layers.Conv2D(16, (6, 8), activation='relu')(input)
+    x = layers.MaxPooling2D(pool_size=(3, 6))(x)
+    return input, x
 
 def build_sslm_model(img_rows, img_cols):
-
     input = layers.Input(shape=(img_rows, img_cols, 1))
-    x = layers.Conv2D(16, (8, 8))(input)
-    x = layers.Activation('relu')(x)
+    x = layers.Conv2D(16, (8, 8), activation='relu')(input)
     x = layers.MaxPooling2D(pool_size=(6, 6))(x)
-    x = layers.Conv2D(64, (4, 4))(x)
-    x = layers.Activation('relu')(x)
-    x = layers.Dropout(0.5)(x)
-    x = layers.Flatten()(x)
-    x = layers.Dense(256)(x)
-    x = layers.Activation('relu')(x)
-    x = layers.Dropout(0.5)(x)
-    x = layers.Dense(1)(x)
-    x = layers.Activation('sigmoid')(x)
-    return Model(inputs = [input], outputs = x)
+    return input, x
 
+def build_fused_model(inputs, outputs):
+    x = layers.Concatenate(axis=1)(outputs)
+    x = layers.Conv2D(32, (6, 3), activation='relu')(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(1, activation='sigmoid')(x)
+    return Model(inputs = inputs, outputs = x)
 
 
 def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
@@ -136,9 +119,9 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     img_rows = X_train.shape[1]
     img_cols = X_train.shape[2]
 
-    #model = build_model(img_rows, img_cols)
-    breakpoint()
-    model = build_sslm_model(x_sslm_train.shape[1], x_sslm_train.shape[2])
+    mls_input, mls_output = build_model(img_rows, img_cols)
+    sslm_input, sslm_output = build_sslm_model(x_sslm_train.shape[1], x_sslm_train.shape[2])
+    model = build_fused_model([mls_input, sslm_input], [mls_output, sslm_output])
 
     if weights_file is not None:
         model.load_weights(weights_file)
@@ -149,7 +132,7 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     early_stopping = EarlyStopping(monitor='val_loss', patience=5)
 
     print('train model...')
-    model.fit(x_sslm_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+    model.fit(x=[X_train, x_sslm_train], y=y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
               verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
 
     #model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
@@ -161,13 +144,13 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     x_sslm_test = np.expand_dims(x_sslm_test, 3)
 
     print('predict test data...')
-    preds = model.predict(x_sslm_test, batch_size=1, verbose=1)
+    preds = model.predict([X_test, x_sslm_test], batch_size=1, verbose=1)
     #preds = model.predict(X_test, batch_size=1, verbose=1)
 
     print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
-    score = model.evaluate(x_sslm_test, y_test, verbose=1)
+    score = model.evaluate([X_test, x_sslm_test], y_test, verbose=1)
     #score = model.evaluate(X_test, y_test, verbose=1)
     print('Test score:', score)
 
