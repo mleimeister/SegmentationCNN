@@ -219,18 +219,22 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     labels_list = []
     failed_tracks_idx = []
 
+    do_async = False
     async_res = []
 
     logger = multiprocessing.log_to_stderr()
     logger.setLevel(logging.INFO)
 
     with multiprocessing.Pool(processes=8) as pool:
-        for i, f in enumerate(audio_files):
-            async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
+        if do_async:
+            for i, f in enumerate(audio_files):
+                async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
 
         for i, f in enumerate(audio_files):
-            beat_mls, beat_sslm, beat_times = async_res[i].get()
-            #beat_mls, beat_sslm, beat_times = compute_features(logger, f, i, audio_files)
+            if do_async:
+                beat_mls, beat_sslm, beat_times = async_res[i].get()
+            else:
+                beat_mls, beat_sslm, beat_times = compute_features(logger, f, i, audio_files)
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
 
@@ -333,7 +337,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
                     next_weight = 1
 
                     data_x[feature_count, :, :] = next_window
-                    data_sslm_x[feature_count] =  sslm_features[:, :, k]
+                    data_sslm_x[feature_count] =  sslm_features[:, :, k - padding_length]
                     data_y[feature_count] = next_label
                     data_weight[feature_count] = next_weight
                     track_idx[feature_count] = current_track
