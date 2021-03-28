@@ -73,27 +73,25 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     MFCCs = scipy.fftpack.dct(x_prime, axis=0, type=2, norm='ortho')
     MFCCs = MFCCs[1:,:] + 1
 
-    # stack (bag) two frames
+    # stack (bag?) two frames
     m = 2
     x = [np.roll(MFCCs,n,axis=1) for n in range(m)]
     x_hat = np.concatenate(x, axis=0)
 
-    # create circular foo
     x_hat_length = x_hat.shape[1]
-    x_padded = np.concatenate((x_hat[:, x_hat_length - context_length : x_hat_length], x_hat, x_hat[:, 0:context_length]), axis=1)
-
     #Cosine distance calculation: D[N/p,L/p] matrix
-    distances = np.full((x_padded.shape[1], context_length), 1.0) #D has as dimensions N/p and L/p
-    for i in range(context_length, x_padded.shape[1] - context_length):
+    distances = np.full((x_hat_length, context_length), 1.0) #D has as dimensions N/p and L/p
+    for i in range(x_hat_length):
         for l in range(context_length):
-            cosine_dist = distance.cosine(x_padded[:,i], x_padded[:,i-(l+1)]) #cosine distance between columns i and i-L
+            # note that negative indices here make our matrix 'time-circular'
+            cosine_dist = distance.cosine(x_hat[:,i], x_hat[:,i-(l+1)]) #cosine distance between columns i and i-L
             distances[i,l] = cosine_dist
 
     #Threshold epsilon[N/p,L/p] calculation
     kappa = 0.1 #equalization factor of 10%
     t1 = time.time()
     epsilon = np.full((distances.shape[0], context_length), 1.0)
-    for i in range(context_length, distances.shape[0]):
+    for i in range(distances.shape[0]):
         for l in range(context_length):
             epsilon[i,l] = np.quantile(np.concatenate((distances[i-l,:], distances[i,:])), kappa)
             if epsilon[i,l] == 0:
@@ -122,10 +120,10 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     beat_sslms = np.zeros((context_length, context_length, beat_frames.shape[0]))
 
     for k in range(beat_frames.shape[0]):
-        sslm_frame = beat_frames[k] // max_pool + context_length
+        sslm_frame = beat_frames[k] // max_pool
         sslm_frame_min = sslm_frame - context_length // 2
         sslm_frame_max = sslm_frame + context_length // 2 + 1
-        beat_sslms[:,:,k] = sslm[:, sslm_frame_min : sslm_frame_max]
+        beat_sslms[:,:,k] = np.take(sslm, range(sslm_frame_min, sslm_frame_max), mode='wrap', axis=1)
 
     return beat_sslms
 
@@ -216,7 +214,7 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     labels_list = []
     failed_tracks_idx = []
 
-    do_async = False
+    do_async = True
     async_res = []
 
     logger = multiprocessing.log_to_stderr()
