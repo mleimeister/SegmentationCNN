@@ -83,6 +83,8 @@ def build_sslm_model(img_rows, img_cols):
 def build_fused_model(inputs, outputs):
     x = layers.Concatenate(axis=1)(outputs)
     x = layers.Conv2D(32, (6, 3), activation='relu')(x)
+    #x = layers.Conv2D(64, (6, 3), activation='relu')(outputs[0])
+    x = layers.Dropout(0.5)(x)
     x = layers.Flatten()(x)
     x = layers.Dense(256, activation='relu')(x)
     x = layers.Dropout(0.5)(x)
@@ -122,6 +124,7 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     mls_input, mls_output = build_model(img_rows, img_cols)
     sslm_input, sslm_output = build_sslm_model(x_sslm_train.shape[1], x_sslm_train.shape[2])
     model = build_fused_model([mls_input, sslm_input], [mls_output, sslm_output])
+    #model = build_fused_model([mls_input], [mls_output])
 
     if weights_file is not None:
         model.load_weights(weights_file)
@@ -134,6 +137,9 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     print('train model...')
     model.fit(x=[X_train, x_sslm_train], y=y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
               verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
+
+    #model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+    #          verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
 
     #model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
     #          verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])

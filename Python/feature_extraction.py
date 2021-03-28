@@ -67,17 +67,13 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
 
     S_to_dB = librosa.power_to_db(mel_spec,ref=np.max)
 
-    # pad 130 frames (to be 65) with noise at -70dB at the beginning
-    #pad = np.full((S_to_dB.shape[0], context_length * 2), -70)
-    #S_padded = np.concatenate((pad, S_to_dB), axis=1)
-
-
+    # first max-pooling: by 2.
     x_prime = skimage.measure.block_reduce(S_to_dB, (1,max_pool), np.max)
 
     MFCCs = scipy.fftpack.dct(x_prime, axis=0, type=2, norm='ortho')
     MFCCs = MFCCs[1:,:] + 1
 
-    # this seems to group two frames together
+    # stack (bag) two frames
     m = 2
     x = [np.roll(MFCCs,n,axis=1) for n in range(m)]
     x_hat = np.concatenate(x, axis=0)
@@ -85,11 +81,10 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     # create circular foo
     x_hat_length = x_hat.shape[1]
     x_padded = np.concatenate((x_hat[:, x_hat_length - context_length : x_hat_length], x_hat, x_hat[:, 0:context_length]), axis=1)
-    print("pre-padded: {}, post-padded: {}".format(x_hat.shape, x_padded.shape))
 
     #Cosine distance calculation: D[N/p,L/p] matrix
     distances = np.full((x_padded.shape[1], context_length), 1.0) #D has as dimensions N/p and L/p
-    for i in range(context_length, x_padded.shape[1] - context_length): #iteration in columns of x_hat
+    for i in range(context_length, x_padded.shape[1] - context_length):
         for l in range(context_length):
             cosine_dist = distance.cosine(x_padded[:,i], x_padded[:,i-(l+1)]) #cosine distance between columns i and i-L
             distances[i,l] = cosine_dist
@@ -98,20 +93,22 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     kappa = 0.1 #equalization factor of 10%
     t1 = time.time()
     epsilon = np.full((distances.shape[0], context_length), 1.0)
-    for i in range(context_length, distances.shape[0]): #iteration in columns of x_hat
+    for i in range(context_length, distances.shape[0]):
         for l in range(context_length):
             epsilon[i,l] = np.quantile(np.concatenate((distances[i-l,:], distances[i,:])), kappa)
+            if epsilon[i,l] == 0:
+                epsilon[i,l] = 0.000000001
+
 
     t2 = time.time()
-
-    print(t2-t1)
+    #print(t2-t1)
 
     #Self Similarity Lag Matrix
     sslm = scipy.special.expit(1-distances/epsilon) #aplicación de la sigmoide
-    #sslm = scipy.special.expit(1-distances)
     sslm = np.transpose(sslm)
 
-    # the paper further downsamples by 3, but since we're doing beat-frames only might be ok
+
+    #breakpoint()
     #sslm = skimage.measure.block_reduce(sslm, (1,3), np.max)
     #x_prime = skimage.measure.block_reduce(x_prime, (1,3), np.max)
 
@@ -235,6 +232,7 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
                 beat_mls, beat_sslm, beat_times = async_res[i].get()
             else:
                 beat_mls, beat_sslm, beat_times = compute_features(logger, f, i, audio_files)
+
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
 
@@ -355,7 +353,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
                             next_weight = 1. - np.abs(l-k) / (label_smearing + 1.)
 
                             data_x[feature_count, :, :] = next_window
-                            data_sslm_x[feature_count] =  sslm_features[:, :, l]
+                            data_sslm_x[feature_count] =  sslm_features[:, :, l - padding_length]
                             data_y[feature_count] = next_label
                             data_weight[feature_count] = next_weight
                             track_idx[feature_count] = current_track
@@ -375,7 +373,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
 
                             next_window = features[:, l-padding_length: l+padding_length+1]
 
-                            data_sslm_x[feature_count] =  sslm_features[:, :, l]
+                            data_sslm_x[feature_count] =  sslm_features[:, :, l - padding_length]
                             data_x[feature_count, :, :] = next_window
                             data_y[feature_count] = 0
                             data_weight[feature_count] = 1
