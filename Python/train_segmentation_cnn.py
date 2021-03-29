@@ -68,7 +68,7 @@ def load_test_data(dataset):
     return test_x, test_sslm_x, test_y, test_weights
 
 
-def build_model(img_rows, img_cols):
+def build_mls_model(img_rows, img_cols):
     input = layers.Input(shape=(img_rows, img_cols, 1))
     x = layers.Conv2D(16, (6, 8), activation='relu')(input)
     x = layers.MaxPooling2D(pool_size=(3, 6))(x)
@@ -82,8 +82,7 @@ def build_sslm_model(img_rows, img_cols):
 
 def build_fused_model(inputs, outputs):
     x = layers.Concatenate(axis=1)(outputs)
-    x = layers.Conv2D(32, (6, 3), activation='relu')(x)
-    #x = layers.Conv2D(64, (6, 3), activation='relu')(outputs[0])
+    x = layers.Conv2D(64, (6, 3), activation='relu')(x)
     x = layers.Dropout(0.5)(x)
     x = layers.Flatten()(x)
     x = layers.Dense(256, activation='relu')(x)
@@ -91,6 +90,10 @@ def build_fused_model(inputs, outputs):
     x = layers.Dense(1, activation='sigmoid')(x)
     return Model(inputs = inputs, outputs = x)
 
+def build_model(mls_rows, mls_cols, sslm_shape):
+    mls_input, mls_output = build_mls_model(mls_rows, mls_cols)
+    sslm_input, sslm_output = build_sslm_model(sslm_shape, sslm_shape)
+    return  build_fused_model([mls_input, sslm_input], [mls_output, sslm_output])
 
 def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
     """
@@ -121,10 +124,7 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     img_rows = X_train.shape[1]
     img_cols = X_train.shape[2]
 
-    mls_input, mls_output = build_model(img_rows, img_cols)
-    sslm_input, sslm_output = build_sslm_model(x_sslm_train.shape[1], x_sslm_train.shape[2])
-    model = build_fused_model([mls_input, sslm_input], [mls_output, sslm_output])
-    #model = build_fused_model([mls_input], [mls_output])
+    model = build_model(img_rows, img_cols, sslm_train.shape[1])
 
     if weights_file is not None:
         model.load_weights(weights_file)

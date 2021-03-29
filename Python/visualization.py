@@ -22,17 +22,14 @@ def visualize_predictions():
     """
 
     preds = np.load('../Data/predsTestTracks_100epochs_lr005.npy')
-    train_features, train_labels, test_features, test_labels = load_raw_features('../Data/rawFeatures.pickle')
-
     data = np.load('../Data/testDataNormalized.npz')
     test_y = data['test_y']
 
     # load file lists and indices
     with open('../Data/fileListsAndIndex.pickle', 'rb') as f:
-            train_files, train_idx, test_files, test_idx = pickle.load(f)
+        train_files, train_idx, test_files, test_idx = pickle.load(f)
 
-    for i in range(len(test_labels)):
-
+    for i in range(len(test_files)):
         f = test_files[i]
         beat_times, beat_numbers = get_beat_times(f, paths.beats_path, include_beat_numbers=True)
         print(f)

@@ -22,6 +22,7 @@ import pickle
 import paths
 import warnings
 import time
+import pdb
 
 import multiprocessing, logging
 
@@ -43,6 +44,10 @@ max_pool = 2
 
 random.seed(1234)           # for reproducibility
 np.random.seed(1234)
+
+def debug_signal_handler(signal, frame):
+    pdb.set_trace()
+
 
 def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
     """
@@ -80,26 +85,31 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
 
     x_hat_length = x_hat.shape[1]
     #Cosine distance calculation: D[N/p,L/p] matrix
-    distances = np.full((x_hat_length, context_length), 1.0) #D has as dimensions N/p and L/p
+
+    sslm_shape = context_length * 3 # because we'll max pool it down at the end
+
+    distances = np.full((x_hat_length, sslm_shape), 1.0) #D has as dimensions N/p and L/p
     for i in range(x_hat_length):
-        for l in range(context_length):
+        for l in range(sslm_shape):
             # note that negative indices here make our matrix 'time-circular'
             cosine_dist = distance.cosine(x_hat[:,i], x_hat[:,i-(l+1)]) #cosine distance between columns i and i-L
             distances[i,l] = cosine_dist
 
     #Threshold epsilon[N/p,L/p] calculation
     kappa = 0.1 #equalization factor of 10%
-    t1 = time.time()
-    epsilon = np.full((distances.shape[0], context_length), 1.0)
+
+    epsilon_buf = np.empty((sslm_shape, sslm_shape * 2))
+    epsilon = np.empty((distances.shape[0], sslm_shape))
+
     for i in range(distances.shape[0]):
-        for l in range(context_length):
-            epsilon[i,l] = np.quantile(np.concatenate((distances[i-l,:], distances[i,:])), kappa)
-            if epsilon[i,l] == 0:
+        for l in range(sslm_shape):
+            epsilon_buf[l] = np.concatenate((distances[i-l,:], distances[i,:]))
+
+        epsilon[i] = np.quantile(epsilon_buf, kappa, axis=1)
+        for l in range(sslm_shape):
+            if epsilon[i, l] == 0:
                 epsilon[i,l] = 0.000000001
 
-
-    t2 = time.time()
-    #print(t2-t1)
 
     #Self Similarity Lag Matrix
     sslm = scipy.special.expit(1-distances/epsilon) #aplicación de la sigmoide
@@ -121,9 +131,10 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
 
     for k in range(beat_frames.shape[0]):
         sslm_frame = beat_frames[k] // max_pool
-        sslm_frame_min = sslm_frame - context_length // 2
-        sslm_frame_max = sslm_frame + context_length // 2 + 1
-        beat_sslms[:,:,k] = np.take(sslm, range(sslm_frame_min, sslm_frame_max), mode='wrap', axis=1)
+        sslm_frame_min = sslm_frame - sslm_shape // 2
+        sslm_frame_max = sslm_frame + sslm_shape // 2 + 1
+        beat_sslm = np.take(sslm, range(sslm_frame_min, sslm_frame_max), mode='wrap', axis=1)
+        beat_sslms[:,:,k] = skimage.measure.block_reduce(beat_sslm, (3,3), np.max)
 
     return beat_sslms
 
@@ -180,9 +191,8 @@ def get_cached_features(filename):
     else:
         return None
 
-def compute_features(logger, f, i, audio_files):
-    logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
 
+def compute_features(f):
     beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
 
     cached_features = get_cached_features(f)
@@ -196,6 +206,11 @@ def compute_features(logger, f, i, audio_files):
     beat_sslm = compute_sslm(waveform, beat_times)
     beat_mls /= np.max(beat_mls)
     return beat_mls, beat_sslm, beat_times
+
+def compute_features_async(logger, f, i, audio_files):
+    logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
+
+    return compute_features(f)
 
 def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     """
@@ -223,13 +238,18 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     with multiprocessing.Pool(processes=8) as pool:
         if do_async:
             for i, f in enumerate(audio_files):
-                async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
+                async_res.append(pool.apply_async(compute_features_async, (logger, f, i, audio_files, )))
 
         for i, f in enumerate(audio_files):
             if do_async:
-                beat_mls, beat_sslm, beat_times = async_res[i].get()
+                try:
+                    beat_mls, beat_sslm, beat_times = async_res[i].get()
+                except Exception as inst:
+                    print("error processing {}".format(f))
+                    print(inst)
+                    continue
             else:
-                beat_mls, beat_sslm, beat_times = compute_features(logger, f, i, audio_files)
+                beat_mls, beat_sslm, beat_times = compute_features_async(logger, f, i, audio_files)
 
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
@@ -447,6 +467,8 @@ def load_raw_features(file):
 
 
 if __name__ == "__main__":
+    #import signal
+    #signal.signal(signal.SIGINT, debug_signal_handler)
 
     train_frame = pd.read_csv('../Data/train_tracks.txt', header=None)
     test_frame = pd.read_csv('../Data/test_tracks.txt', header=None)
