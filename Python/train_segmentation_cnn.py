@@ -23,7 +23,7 @@ from tensorflow.keras import layers
 from keras.callbacks import EarlyStopping
 from keras.optimizers import SGD
 
-np.random.seed(1234)  # for reproducibility
+np.random.seed(1235)  # for reproducibility
 
 
 def load_training_data(dataset):

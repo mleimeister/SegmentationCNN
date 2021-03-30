@@ -103,7 +103,7 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
 
     for i in range(distances.shape[0]):
         for l in range(sslm_shape):
-            epsilon_buf[l] = np.concatenate((distances[i-l,:], distances[i,:]))
+            epsilon_buf[l] = np.concatenate((distances[i-(l+1),:], distances[i,:]))
 
         epsilon[i] = np.quantile(epsilon_buf, kappa, axis=1)
         for l in range(sslm_shape):
@@ -247,6 +247,7 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
                 except Exception as inst:
                     print("error processing {}".format(f))
                     print(inst)
+                    failed_tracks_idx.append(i)
                     continue
             else:
                 beat_mls, beat_sslm, beat_times = compute_features_async(logger, f, i, audio_files)
