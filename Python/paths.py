@@ -25,6 +25,6 @@ def remove_suffix(filename):
 def with_suffix(path, ext):
      return remove_suffix(path) + '.' + ext
 
-def get_mls_path(audio_filename):
-     return os.path.join(mls_path, remove_suffix(audio_filename) + '.mls.npy')
+def get_audio_cache_path(audio_filename, ext):
+     return os.path.join(mls_path, remove_suffix(audio_filename) + ext)
 

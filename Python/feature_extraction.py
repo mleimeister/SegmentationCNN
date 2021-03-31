@@ -25,6 +25,7 @@ import time
 import pdb
 
 import multiprocessing, logging
+from contextlib import contextmanager
 
 from utils import *
 import scipy
@@ -88,7 +89,7 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
 
     sslm_shape = context_length * 3 # because we'll max pool it down at the end
 
-    distances = np.full((x_hat_length, sslm_shape), 1.0) #D has as dimensions N/p and L/p
+    distances = np.full((x_hat_length, sslm_shape), 1.0, dtype=np.float32) #D has as dimensions N/p and L/p
     for i in range(x_hat_length):
         for l in range(sslm_shape):
             # note that negative indices here make our matrix 'time-circular'
@@ -98,8 +99,8 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     #Threshold epsilon[N/p,L/p] calculation
     kappa = 0.1 #equalization factor of 10%
 
-    epsilon_buf = np.empty((sslm_shape, sslm_shape * 2))
-    epsilon = np.empty((distances.shape[0], sslm_shape))
+    epsilon_buf = np.empty((sslm_shape, sslm_shape * 2), dtype=np.float32)
+    epsilon = np.empty((distances.shape[0], sslm_shape), dtype=np.float32)
 
     for i in range(distances.shape[0]):
         for l in range(sslm_shape):
@@ -115,19 +116,8 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     sslm = scipy.special.expit(1-distances/epsilon) #aplicación de la sigmoide
     sslm = np.transpose(sslm)
 
-
-    #breakpoint()
-    #sslm = skimage.measure.block_reduce(sslm, (1,3), np.max)
-    #x_prime = skimage.measure.block_reduce(x_prime, (1,3), np.max)
-
-    #Check if SSLM has nans and if it has them, substitute them by 0
-    #for i in range(sslm.shape[0]):
-    #    for j in range(sslm.shape[1]):
-    #        if np.isnan(sslm[i,j]):
-    #            sslm[i,j] = 0
-
     beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
-    beat_sslms = np.zeros((context_length, context_length, beat_frames.shape[0]))
+    beat_sslms = np.zeros((context_length, context_length, beat_frames.shape[0]), dtype=np.float32)
 
     for k in range(beat_frames.shape[0]):
         sslm_frame = beat_frames[k] // max_pool
@@ -183,28 +173,35 @@ def load_waveform(filename):
         y, sr = librosa.load(path, sr=22050, mono=True)
         return y
 
-def get_cached_features(filename):
-    computed_mls_file = paths.get_mls_path(filename)
+def get_audio_cache(filename, ext):
+    path = paths.get_audio_cache_path(filename, ext)
 
-    if os.path.exists(computed_mls_file):
-        return np.load(computed_mls_file)
+    if os.path.exists(path):
+        return np.load(path)
     else:
         return None
 
+def set_audio_cache(filename, ext, data):
+    path = paths.get_audio_cache_path(filename, ext)
+    np.save(path, data)
 
 def compute_features(f):
     beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
 
-    cached_features = get_cached_features(f)
-
-    if cached_features is not None:
-        return cached_features
-
     waveform = load_waveform(f)
 
-    beat_mls = compute_beat_mls(waveform, beat_times)
-    beat_sslm = compute_sslm(waveform, beat_times)
-    beat_mls /= np.max(beat_mls)
+    beat_mls = get_audio_cache(f, '.mls.npy')
+    if beat_mls is None:
+        beat_mls = compute_beat_mls(waveform, beat_times)
+        beat_mls /= np.max(beat_mls)
+        set_audio_cache(f, '.mls.npy', beat_mls)
+
+    beat_sslm = get_audio_cache(f, '.mls_sslm.npy')
+
+    if beat_sslm is None:
+        beat_sslm = compute_sslm(waveform, beat_times)
+        set_audio_cache(f, '.mls_sslm.npy', beat_sslm)
+
     return beat_mls, beat_sslm, beat_times
 
 def compute_features_async(logger, f, i, audio_files):
@@ -230,11 +227,14 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     failed_tracks_idx = []
 
     do_async = True
+    max_tracks = None
+
     async_res = []
 
     logger = multiprocessing.log_to_stderr()
     logger.setLevel(logging.INFO)
 
+    n_tracks = 0
     with multiprocessing.Pool(processes=8) as pool:
         if do_async:
             for i, f in enumerate(audio_files):
@@ -268,6 +268,10 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
             feature_list.append(beat_mls)
             sslm_feature_list.append(beat_sslm)
             labels_list.append(label_vec)
+
+            if max_tracks is not None and n_tracks > max_tracks:
+                break
+            n_tracks += 1
 
     return feature_list, sslm_feature_list, labels_list, failed_tracks_idx
 
