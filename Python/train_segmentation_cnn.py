@@ -12,10 +12,18 @@ import numpy as np
 from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
+import tensorflow.keras.layers
+from tensorflow.keras.models import Model
+
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
 from keras.callbacks import EarlyStopping
 from keras.optimizers import SGD
 
-np.random.seed(1234)  # for reproducibility
+np.random.seed(1235)  # for reproducibility
 
 
 def load_training_data(dataset):
@@ -32,10 +40,11 @@ def load_training_data(dataset):
 
     data = np.load(dataset)
     train_x = data['train_x']
+    train_sslm_x = data['train_sslm_x']
     train_y = data['train_y']
     train_weights = data['train_weights']
 
-    return train_x, train_y, train_weights
+    return train_x, train_sslm_x, train_y, train_weights
 
 
 def load_test_data(dataset):
@@ -52,32 +61,39 @@ def load_test_data(dataset):
 
     data = np.load(dataset)
     test_x = data['test_x']
+    test_sslm_x = data['test_sslm_x']
     test_y = data['test_y']
     test_weights = data['test_weights']
 
-    return test_x, test_y, test_weights
+    return test_x, test_sslm_x, test_y, test_weights
 
 
-def build_model(img_rows, img_cols):
+def build_mls_model(img_rows, img_cols):
+    input = layers.Input(shape=(img_rows, img_cols, 1))
+    x = layers.Conv2D(16, (6, 8), activation='relu')(input)
+    x = layers.MaxPooling2D(pool_size=(3, 6))(x)
+    return input, x
 
-    model = Sequential()
+def build_sslm_model(img_rows, img_cols):
+    input = layers.Input(shape=(img_rows, img_cols, 2))
+    x = layers.Conv2D(16, (8, 8), activation='relu')(input)
+    x = layers.MaxPooling2D(pool_size=(6, 6))(x)
+    return input, x
 
-    model.add(Convolution2D(32, (6, 8), input_shape=(img_rows, img_cols, 1)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(5, 2)))
-    model.add(Convolution2D(64, (4, 6)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.5))
-    model.add(Flatten())
-    model.add(Dense(256))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
-    model.add(Dense(1))
-    model.add(Activation('sigmoid'))
+def build_fused_model(inputs, outputs):
+    x = layers.Concatenate(axis=1)(outputs)
+    x = layers.Conv2D(64, (6, 3), activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(1, activation='sigmoid')(x)
+    return Model(inputs = inputs, outputs = x)
 
-    return model
-
+def build_model(mls_rows, mls_cols, sslm_shape):
+    mls_input, mls_output = build_mls_model(mls_rows, mls_cols)
+    sslm_input, sslm_output = build_sslm_model(sslm_shape, sslm_shape)
+    return  build_fused_model([mls_input, sslm_input], [mls_output, sslm_output])
 
 def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
     """
@@ -90,13 +106,14 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     """
 
     print('loading training data...')
-    X_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
+    X_train, x_sslm_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
 
     print('training data size:')
     print(X_train.shape)
 
     p = np.random.permutation(X_train.shape[0])
     X_train = X_train[p, :, :]
+    x_sslm_train = x_sslm_train[p, :, :]
     y_train = y_train[p]
     w_train = w_train[p]
 
@@ -106,7 +123,7 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     img_rows = X_train.shape[1]
     img_cols = X_train.shape[2]
 
-    model = build_model(img_rows, img_cols)
+    model = build_model(img_rows, img_cols, x_sslm_train.shape[1])
 
     if weights_file is not None:
         model.load_weights(weights_file)
@@ -114,24 +131,31 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     sgd = SGD(lr=0.05, decay=1e-4, momentum=0.9, nesterov=True)
     model.compile(loss='binary_crossentropy', optimizer=sgd)
 
-    #early_stopping = EarlyStopping(monitor='val_loss', patience=5)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10)
 
     print('train model...')
-    model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
-              verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
+    model.fit(x=[X_train, x_sslm_train], y=y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+              verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[early_stopping])
 
+    #model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+    #          verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
+
+    #model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+    #          verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
     print('load test data...')
-    X_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
+    X_test, x_sslm_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
     X_test = X_test.astype('float32')
     X_test = np.expand_dims(X_test, 3)
 
     print('predict test data...')
-    preds = model.predict(X_test, batch_size=1, verbose=1)
+    preds = model.predict([X_test, x_sslm_test], batch_size=1, verbose=1)
+    #preds = model.predict(X_test, batch_size=1, verbose=1)
 
     print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
-    score = model.evaluate(X_test, y_test, verbose=1)
+    score = model.evaluate([X_test, x_sslm_test], y_test, verbose=1)
+    #score = model.evaluate(X_test, y_test, verbose=1)
     print('Test score:', score)
 
     # save model
@@ -139,4 +163,4 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
 
 
 if __name__ == "__main__":
-    train_model()
+    train_model(nb_epoch=75)

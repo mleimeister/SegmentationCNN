@@ -8,6 +8,7 @@
 import os
 import pandas as pd
 import numpy as np
+import paths
 
 
 def triang(start, mid, stop, equal=False):
@@ -89,15 +90,23 @@ def get_segment_times(audio_file, annotation_folder):
 
     # for some tracks, only one annotation is available, take first one as default
     # if there is no annotation available, store -1 as error code
+
     try:
-        label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
+        label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile3_uppercase.txt')
         t = pd.read_table(label_file, header=None)
     except IOError:
         try:
-            label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
+            label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
             t = pd.read_table(label_file, header=None)
         except IOError:
-            return -1
+            try:
+                label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
+                t = pd.read_table(label_file, header=None)
+            except IOError:
+                return -1
+
+    if t[1].dtype == 'O':
+        t = t[~(t[1].str.lower().isin(['silence', 'end']))]
 
     segment_times = t.iloc[:, 0].values
 
@@ -110,6 +119,9 @@ def get_beat_times(audio_file, beats_folder, include_beat_numbers=False):
     :param beats_folder: folder with preanalysed beat times (in .beats.txt format per track)
     :return: beat times in seconds
     """
+
+    if not "/" in audio_file:
+        audio_file = os.path.join(paths.audio_path, audio_file)
 
     file_name = os.path.splitext(os.path.basename(audio_file))[0]
     beats_file = os.path.join(beats_folder, file_name + '.beats.txt')
