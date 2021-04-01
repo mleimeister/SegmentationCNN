@@ -13,9 +13,10 @@ import peakutils
 import mir_eval
 import paths
 
+from operator import itemgetter
+
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
-f_measure_thresh = 3    # tolerance window in seconds
 
 
 def load_data(preds_file, file_lists):
@@ -53,14 +54,14 @@ def post_processing(preds_track):
     preds_track = np.multiply(preds_track,
                               np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
 
+
     # unit maximum
     preds_track /= np.max(preds_track)
 
     return preds_track
 
 
-if __name__ == "__main__":
-
+def run_eval(f_measure_thresh):
     f_measures = []
     precisions = []
     recalls = []
@@ -69,9 +70,6 @@ if __name__ == "__main__":
     preds = np.reshape(preds, len(preds))
 
     for i, f in enumerate(test_files):
-
-        print("Evaluating {}".format(f))
-
         # load annotations
         segment_times = get_segment_times(f, paths.annotations_path)
 
@@ -83,25 +81,42 @@ if __name__ == "__main__":
 
         # post processing
         preds_track = post_processing(preds_track)
-        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1)
 
-        pred_times = beat_times[peak_loc] - 1
+        # insert a zero value at the beginning of the predictions to help the peak-finding algorithm
+        # identify the first beat of a track
+
+        peds_track = np.insert(preds_track, 0, 0)
+        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1) - 1
+        pred_times = beat_times[peak_loc]
 
         # compute f-measure
-        f_score, p, r = mir_eval.onset.f_measure(segment_times, pred_times, window=f_measure_thresh)
+        f_score, p, r = mir_eval.onset.f_measure(np.sort(segment_times), np.sort(pred_times), window=f_measure_thresh)
 
         f_measures.append(f_score)
         precisions.append(p)
         recalls.append(r)
 
-        print("f-Measure: {}, precision: {}, recall: {}".format(f_score, p, r))
-
     mean_f = np.mean(np.asarray(f_measures))
     mean_p = np.mean(np.asarray(precisions))
     mean_r = np.mean(np.asarray(recalls))
 
-    print(" ")
-    print("Mean scores across all test tracks:")
-    print("f-Measure: {}, precision: {}, recall: {}".format(mean_f, mean_p, mean_r))
+    print("mean f-Measure for {}: {}, precision: {}, recall: {}".format(f_measure_thresh, mean_f, mean_p, mean_r))
 
+    return list(zip(test_files, f_measures, precisions, recalls))
+
+def get_sort_key(item):
+    return item[1]
+
+if __name__ == "__main__":
+    short = run_eval(0.5)
+    long = run_eval(3.0)
+
+    for i in range(len(short)):
+        short[i] += long[i][1:4]
+
+    sorted_tracks = sorted(short, key=get_sort_key)
+
+    print("{:<20}{:4}\t{:4}\t{:4}\t{:4}\t{:4}\t{:4}".format("filename", "f0.5", "p0.5", "r0.5", "f3", "p3", "r3"))
+    for track in sorted_tracks:
+        print("{:<20}{:4.2}\t{:4.2}\t{:4.2}\t{:4.2}\t{:4.2}\t{:4.2}".format(*track))
 
