@@ -96,8 +96,6 @@ def run_eval(f_measure_thresh):
         precisions.append(p)
         recalls.append(r)
 
-        #print("{} f-Measure: {}, precision: {}, recall: {}".format(f, f_score, p, r))
-
     mean_f = np.mean(np.asarray(f_measures))
     mean_p = np.mean(np.asarray(precisions))
     mean_r = np.mean(np.asarray(recalls))
