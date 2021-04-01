@@ -103,8 +103,7 @@ def get_segment_times(audio_file, annotation_folder):
 
     return segment_times
 
-
-def get_beat_times(audio_file, beats_folder):
+def get_beat_times(audio_file, beats_folder, include_beat_numbers=False):
     """
     Read beat times from annotation file.
     :param audio_file: path to audio files
@@ -114,7 +113,15 @@ def get_beat_times(audio_file, beats_folder):
 
     file_name = os.path.splitext(os.path.basename(audio_file))[0]
     beats_file = os.path.join(beats_folder, file_name + '.beats.txt')
-    t = pd.read_table(beats_file, header=None)
-    beat_times = t.iloc[:, 0].values
 
-    return beat_times
+    if not os.path.isfile(beats_file):
+        print(f"Extracting beat times for {audio_file}")
+        os.system(f"DBNDownBeatTracker single '{audio_file}' -o '{beats_file}'")
+
+    t = pd.read_table(beats_file, header=None)
+
+    if include_beat_numbers:
+        return t[0].values, t[1].values
+    else:
+        return t[0].values
+

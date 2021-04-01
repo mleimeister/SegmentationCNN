@@ -128,6 +128,7 @@ if __name__ == "__main__":
     if not os.path.isfile(out_dir + file_name + '.beats.txt'):
         print("Extracting beat times (this might take a while)...")
         os.system('DBNBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
+        os.system('DBNDownBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
 
     print("Computing features")
     mls_features, beat_times = extract_features(audio_file, out_dir + file_name + '.beats.txt')
