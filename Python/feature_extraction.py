@@ -43,17 +43,73 @@ padding_length = int(context_length / 2)
 
 max_pool = 2
 
+# for debugging
+# do_async = False
+# max_tracks = 1
+
+do_async = True
+max_tracks = None
+
 random.seed(1234)           # for reproducibility
 np.random.seed(1234)
 
 def debug_signal_handler(signal, frame):
     pdb.set_trace()
 
+def compute_sslm(input_vector, beat_times, hop_size):
+    # stack (bag?) two frames
+    m = 2
+    x = [np.roll(input_vector,n,axis=1) for n in range(m)]
+    x_hat = np.concatenate(x, axis=0)
 
-def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+    x_hat_length = x_hat.shape[1]
+
+    sslm_shape = context_length * 3 # because we'll max pool it down at the end
+
+    #Cosine distance calculation: D[N/p,L/p] matrix
+    distances = np.full((x_hat_length, sslm_shape), 1.0, dtype=np.float32) #D has as dimensions N/p and L/p
+    for i in range(x_hat_length):
+        for l in range(sslm_shape):
+            # note that negative indices here make our matrix 'time-circular'
+            cosine_dist = distance.cosine(x_hat[:,i], x_hat[:,i-(l+1)]) #cosine distance between columns i and i-L
+            distances[i,l] = cosine_dist
+
+    #Threshold epsilon[N/p,L/p] calculation
+    kappa = 0.1 #equalization factor of 10%
+
+    epsilon_buf = np.empty((sslm_shape, sslm_shape * 2), dtype=np.float32)
+    epsilon = np.empty((distances.shape[0], sslm_shape), dtype=np.float32)
+
+    for i in range(distances.shape[0]):
+        for l in range(sslm_shape):
+            epsilon_buf[l] = np.concatenate((distances[i-(l+1),:], distances[i,:]))
+
+        epsilon[i] = np.quantile(epsilon_buf, kappa, axis=1)
+        for l in range(sslm_shape):
+            if epsilon[i, l] == 0:
+                epsilon[i,l] = 0.000000001
+
+
+    sslm = scipy.special.expit(1-distances/epsilon) # sigmoid
+    sslm = np.transpose(sslm)
+
+    beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
+    beat_sslms = np.zeros((context_length, context_length, beat_frames.shape[0]), dtype=np.float32)
+
+    for k in range(beat_frames.shape[0]):
+        sslm_frame = beat_frames[k] // max_pool
+        sslm_frame_min = sslm_frame - sslm_shape // 2
+        sslm_frame_max = sslm_frame + sslm_shape // 2 + 1
+        beat_sslm = np.take(sslm, range(sslm_frame_min, sslm_frame_max), mode='wrap', axis=1)
+        beat_sslms[:,:,k] = skimage.measure.block_reduce(beat_sslm, (3,3), np.max)
+
+    return beat_sslms
+
+
+
+def compute_mls_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
     """
-    Compute average Mel log spectrogram per beat given previously
-    extracted beat times.
+    Compute self-similarilty lag matrix (SSLM) using mel-log spectrogram as input
 
     :param waveform: raw waveform data
     :param beat_times: list of beat times in seconds
@@ -79,54 +135,17 @@ def compute_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, h
     MFCCs = scipy.fftpack.dct(x_prime, axis=0, type=2, norm='ortho')
     MFCCs = MFCCs[1:,:] + 1
 
-    # stack (bag?) two frames
-    m = 2
-    x = [np.roll(MFCCs,n,axis=1) for n in range(m)]
-    x_hat = np.concatenate(x, axis=0)
+    return compute_sslm(MFCCs, beat_times, hop_size)
 
-    x_hat_length = x_hat.shape[1]
-    #Cosine distance calculation: D[N/p,L/p] matrix
+def compute_chroma_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+    spec = librosa.stft(y=waveform, n_fft=fft_size, hop_length=hop_size, win_length=fft_size, window=scipy.signal.hamming)
+    spec = np.abs(spec)
+    x_prime = skimage.measure.block_reduce(spec, (1,max_pool), np.max)
 
-    sslm_shape = context_length * 3 # because we'll max pool it down at the end
+    chroma_fb = librosa.filters.chroma(22050, fft_size, n_chroma=12)
+    chromagram = np.dot(chroma_fb, x_prime)
 
-    distances = np.full((x_hat_length, sslm_shape), 1.0, dtype=np.float32) #D has as dimensions N/p and L/p
-    for i in range(x_hat_length):
-        for l in range(sslm_shape):
-            # note that negative indices here make our matrix 'time-circular'
-            cosine_dist = distance.cosine(x_hat[:,i], x_hat[:,i-(l+1)]) #cosine distance between columns i and i-L
-            distances[i,l] = cosine_dist
-
-    #Threshold epsilon[N/p,L/p] calculation
-    kappa = 0.1 #equalization factor of 10%
-
-    epsilon_buf = np.empty((sslm_shape, sslm_shape * 2), dtype=np.float32)
-    epsilon = np.empty((distances.shape[0], sslm_shape), dtype=np.float32)
-
-    for i in range(distances.shape[0]):
-        for l in range(sslm_shape):
-            epsilon_buf[l] = np.concatenate((distances[i-(l+1),:], distances[i,:]))
-
-        epsilon[i] = np.quantile(epsilon_buf, kappa, axis=1)
-        for l in range(sslm_shape):
-            if epsilon[i, l] == 0:
-                epsilon[i,l] = 0.000000001
-
-
-    #Self Similarity Lag Matrix
-    sslm = scipy.special.expit(1-distances/epsilon) #aplicación de la sigmoide
-    sslm = np.transpose(sslm)
-
-    beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
-    beat_sslms = np.zeros((context_length, context_length, beat_frames.shape[0]), dtype=np.float32)
-
-    for k in range(beat_frames.shape[0]):
-        sslm_frame = beat_frames[k] // max_pool
-        sslm_frame_min = sslm_frame - sslm_shape // 2
-        sslm_frame_max = sslm_frame + sslm_shape // 2 + 1
-        beat_sslm = np.take(sslm, range(sslm_frame_min, sslm_frame_max), mode='wrap', axis=1)
-        beat_sslms[:,:,k] = skimage.measure.block_reduce(beat_sslm, (3,3), np.max)
-
-    return beat_sslms
+    return compute_sslm(chromagram + 1, beat_times, hop_size)
 
 def compute_beat_mls(features, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
     """
@@ -173,36 +192,35 @@ def load_waveform(filename):
         y, sr = librosa.load(path, sr=22050, mono=True)
         return y
 
-def get_audio_cache(filename, ext):
+def with_audio_cache(filename, ext, waveform, beat_times, genf):
     path = paths.get_audio_cache_path(filename, ext)
 
     if os.path.exists(path):
-        return np.load(path)
+        return np.load(path), waveform
     else:
-        return None
+        if waveform is None:
+            waveform = load_waveform(filename)
 
-def set_audio_cache(filename, ext, data):
-    path = paths.get_audio_cache_path(filename, ext)
-    np.save(path, data)
+        data = genf(waveform, beat_times)
+        np.save(path, data)
+        return data, waveform
 
 def compute_features(f):
     beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
 
-    waveform = load_waveform(f)
-
-    beat_mls = get_audio_cache(f, '.mls.npy')
-    if beat_mls is None:
+    def gen_beat_mls(waveform, beat_times):
         beat_mls = compute_beat_mls(waveform, beat_times)
         beat_mls /= np.max(beat_mls)
-        set_audio_cache(f, '.mls.npy', beat_mls)
+        return beat_mls
 
-    beat_sslm = get_audio_cache(f, '.mls_sslm.npy')
+    waveform = None
+    beat_mls, waveform = with_audio_cache(f, '.mls.npy', waveform, beat_times, gen_beat_mls)
+    beat_mls_sslm, waveform = with_audio_cache(f, '.mls_sslm.npy', waveform, beat_times, compute_mls_sslm)
+    chroma_sslm, waveform = with_audio_cache(f, '.chroma_sslm.npy', waveform, beat_times, compute_chroma_sslm)
 
-    if beat_sslm is None:
-        beat_sslm = compute_sslm(waveform, beat_times)
-        set_audio_cache(f, '.mls_sslm.npy', beat_sslm)
+    beat_sslm = np.stack((beat_mls_sslm, chroma_sslm), axis=3)
 
-    return beat_mls, beat_sslm, beat_times
+    return beat_mls, beat_sslm, chroma_sslm, beat_times
 
 def compute_features_async(logger, f, i, audio_files):
     logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
@@ -226,8 +244,6 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     labels_list = []
     failed_tracks_idx = []
 
-    do_async = True
-    max_tracks = None
 
     async_res = []
 
@@ -243,14 +259,14 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
         for i, f in enumerate(audio_files):
             if do_async:
                 try:
-                    beat_mls, beat_sslm, beat_times = async_res[i].get()
+                    beat_mls, beat_sslm, chroma_sslm, beat_times = async_res[i].get()
                 except Exception as inst:
                     print("error processing {}".format(f))
                     print(inst)
                     failed_tracks_idx.append(i)
                     continue
             else:
-                beat_mls, beat_sslm, beat_times = compute_features_async(logger, f, i, audio_files)
+                beat_mls, beat_sslm, chroma_sslm, beat_times = compute_features_async(logger, f, i, audio_files)
 
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
@@ -325,7 +341,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
 
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
-    data_sslm_x = np.zeros(shape=(n_preallocate, context_length, context_length), dtype=np.float32)
+    data_sslm_x = np.zeros(shape=(n_preallocate, context_length, context_length, 2), dtype=np.float32)
     data_y = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     data_weight = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     track_idx = np.zeros(shape=(n_preallocate,), dtype=int)
@@ -449,7 +465,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
             break
 
     data_x = data_x[:feature_count, :, :]
-    data_sslm_x = data_sslm_x[:feature_count, :, :]
+    data_sslm_x = data_sslm_x[:feature_count, :, :, :]
     data_y = data_y[:feature_count]
     data_weight = data_weight[:feature_count]
     track_idx = track_idx[:feature_count]

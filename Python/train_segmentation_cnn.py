@@ -75,7 +75,7 @@ def build_mls_model(img_rows, img_cols):
     return input, x
 
 def build_sslm_model(img_rows, img_cols):
-    input = layers.Input(shape=(img_rows, img_cols, 1))
+    input = layers.Input(shape=(img_rows, img_cols, 2))
     x = layers.Conv2D(16, (8, 8), activation='relu')(input)
     x = layers.MaxPooling2D(pool_size=(6, 6))(x)
     return input, x
@@ -119,7 +119,6 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
 
     X_train = X_train.astype('float32')
     X_train = np.expand_dims(X_train, 3)
-    x_sslm_train = np.expand_dims(x_sslm_train, 3)
 
     img_rows = X_train.shape[1]
     img_cols = X_train.shape[2]
@@ -147,7 +146,6 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     X_test, x_sslm_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
     X_test = X_test.astype('float32')
     X_test = np.expand_dims(X_test, 3)
-    x_sslm_test = np.expand_dims(x_sslm_test, 3)
 
     print('predict test data...')
     preds = model.predict([X_test, x_sslm_test], batch_size=1, verbose=1)
