@@ -52,8 +52,9 @@ def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
     preds_track = np.convolve(preds_track, np.hamming(4) / np.sum(np.hamming(4)), 'same')
 
     # emphasize peaks
-    preds_track = np.multiply(preds_track,
-                              np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
+    if len(preds_track) >= 32:
+        preds_track = np.multiply(preds_track,
+                                  np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
 
 
     # emphasize downbeeat
