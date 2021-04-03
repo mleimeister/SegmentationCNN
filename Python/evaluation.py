@@ -61,6 +61,7 @@ def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
     if emphasize_downbeat:
         preds_track = np.multiply(preds_track, np.where(beat_numbers == 1, 1, 0.5))
 
+
     # unit maximum
     preds_track /= np.max(preds_track)
 
@@ -68,7 +69,6 @@ def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
 
 def get_sort_key(item):
     return item[1]
-
 
 def run_eval(f_measure_thresh):
     f_measures = []
@@ -89,7 +89,11 @@ def run_eval(f_measure_thresh):
         preds_track = np.squeeze(np.asarray(preds[test_idx == i]))
 
         # post processing
-        preds_track = post_processing(preds_track, beat_numbers, emphasize_downbeat=False)
+        preds_track = post_processing(preds_track)
+
+        # insert a zero value at the beginning of the predictions to help the peak-finding algorithm
+        # identify the first beat of a track
+
         peds_track = np.insert(preds_track, 0, 0)
         peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1) - 1
         pred_times = beat_times[peak_loc]
@@ -101,30 +105,26 @@ def run_eval(f_measure_thresh):
         precisions.append(p)
         recalls.append(r)
 
-        #print("{} f-Measure: {}, precision: {}, recall: {}".format(f, f_score, p, r))
-
     mean_f = np.mean(np.asarray(f_measures))
     mean_p = np.mean(np.asarray(precisions))
     mean_r = np.mean(np.asarray(recalls))
 
     print("mean f-Measure for {}: {}, precision: {}, recall: {}".format(f_measure_thresh, mean_f, mean_p, mean_r))
+    return list(zip(test_files, f_measures, precisions, recalls))
 
-    combined_tracks = list(zip(test_files, f_measures, precisions, recalls))
-    sorted_tracks = sorted(combined_tracks, key=get_sort_key)
-    print("worst:")
-    for x in range(3):
-        track = sorted_tracks[x]
-        print("{:<20}{:4.2}\t{:4.2}\t{:4.2}".format(*track))
-
-    print("best:")
-    for x in range(1,4):
-        track = sorted_tracks[-x]
-        print("{:<20}{:4.2}\t{:4.2}\t{:4.2}".format(*track))
-
-
-
+def get_sort_key(item):
+    return item[1]
 
 if __name__ == "__main__":
-    run_eval(0.5)
-    run_eval(3.0)
+    short = run_eval(0.5)
+    long = run_eval(3.0)
+
+    for i in range(len(short)):
+        short[i] += long[i][1:4]
+
+    sorted_tracks = sorted(short, key=get_sort_key)
+
+    print("{:<20}{:4}\t{:4}\t{:4}\t{:4}\t{:4}\t{:4}".format("filename", "f0.5", "p0.5", "r0.5", "f3", "p3", "r3"))
+    for track in sorted_tracks:
+        print("{:<20}{:4.2}\t{:4.2}\t{:4.2}\t{:4.2}\t{:4.2}\t{:4.2}".format(*track))
 
