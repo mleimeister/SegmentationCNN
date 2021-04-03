@@ -196,7 +196,7 @@ def with_audio_cache(filename, ext, waveform, beat_times, genf):
     path = paths.get_audio_cache_path(filename, ext)
 
     if os.path.exists(path):
-        return np.load(path), waveform
+        return np.load(path,  mmap_mode='r'), waveform
     else:
         if waveform is None:
             waveform = load_waveform(filename)
@@ -224,8 +224,7 @@ def compute_features(f):
 
 def compute_features_async(logger, f, i, audio_files):
     logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
-
-    return compute_features(f)
+    compute_features(f)
 
 def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     """
@@ -259,7 +258,11 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
         for i, f in enumerate(audio_files):
             if do_async:
                 try:
-                    beat_mls, beat_sslm, chroma_sslm, beat_times = async_res[i].get()
+                    # have child process actually write features to disk
+                    async_res[i].get()
+
+                    # now reload them in mmap
+                    beat_mls, beat_sslm, chroma_sslm, beat_times = compute_features(f)
                 except Exception as inst:
                     print("error processing {}".format(f))
                     print(inst)
@@ -337,7 +340,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
     :return: batch data in the form (n_items, n_melbands, n_context)
     """
 
-    n_preallocate = 250000
+    n_preallocate = 500000
 
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
@@ -465,7 +468,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
             break
 
     data_x = data_x[:feature_count, :, :]
-    data_sslm_x = data_sslm_x[:feature_count, :, :, :]
+    data_sslm_x.resize((feature_count, data_sslm_x.shape[1], data_sslm_x.shape[2], data_sslm_x.shape[3]))
     data_y = data_y[:feature_count]
     data_weight = data_weight[:feature_count]
     track_idx = track_idx[:feature_count]
