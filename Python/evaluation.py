@@ -38,11 +38,10 @@ def load_data(preds_file, file_lists):
     return preds, test_files, test_idx
 
 
-def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
+def post_processing(preds_track):
     """
     Post processing of prediction probabilities, applies smoothing
     window and emphasizes beats by multiplying with running avarage.
-    Also weights predictions towards beat "1".
 
     :param preds_track: CNN predictions per beat
     :return: post-processed predictions
@@ -55,11 +54,6 @@ def post_processing(preds_track, beat_numbers, emphasize_downbeat=False):
     if len(preds_track) >= 32:
         preds_track = np.multiply(preds_track,
                                   np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
-
-
-    # emphasize downbeeat
-    if emphasize_downbeat:
-        preds_track = np.multiply(preds_track, np.where(beat_numbers == 1, 1, 0.5))
 
 
     # unit maximum
