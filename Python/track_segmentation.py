@@ -40,7 +40,6 @@ def compute_cnn_predictions(mls_features, sslm_features, time_features):
 
     mls_features = np.expand_dims(mls_features, 3)
     sslm_features = np.transpose(sslm_features, (2, 0, 1))
-    #sslm_features = sslm_features[:, :, :, 0] # remove chroma for now
 
     predictions = model.predict([mls_features, sslm_features, time_features], batch_size=1)
 
@@ -116,22 +115,9 @@ def compute_segments_from_predictions(predictions, beat_times):
 
     print("raw predicitions:")
     print_predictions(predictions, beat_times)
+    peak_loc = choose_preds(predictions, beat_times)
 
-    if True:
-        peak_loc = choose_preds(predictions, beat_times)
-        segment_times = beat_times[peak_loc]
-        #print("after post-processing:")
-        #print_predictions(peak_loc, beat_times)
-
-    else:
-        predictions = post_processing(predictions)
-
-        print("after post-processing:")
-        print_predictions(predictions, beat_times)
-
-        predictions = np.insert(predictions, 0, 0)
-        peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.1) - 1
-        segment_times = beat_times[peak_loc]
+    segment_times = beat_times[peak_loc]
 
     print("beat_num\ttime:")
     for i in peak_loc:

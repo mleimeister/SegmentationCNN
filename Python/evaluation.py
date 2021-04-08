@@ -111,18 +111,8 @@ def run_eval(f_measure_thresh):
         if len(preds_track) == 0:
             continue
 
-        if True:
-            pred_indexes = choose_preds(preds_track, beat_times)
-            pred_times = beat_times[pred_indexes]
-        else:
-            preds_track = post_processing(preds_track)
-
-            # insert a zero value at the beginning of the predictions to help the peak-finding algorithm
-            # identify the first beat of a track
-
-            peds_track = np.insert(preds_track, 0, 0)
-            peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1) - 1
-            pred_times = beat_times[peak_loc]
+        pred_indexes = choose_preds(preds_track, beat_times)
+        pred_times = beat_times[pred_indexes]
 
         # compute f-measure
         f_score, p, r = mir_eval.onset.f_measure(np.sort(segment_times), np.sort(pred_times), window=f_measure_thresh)
@@ -142,6 +132,7 @@ def get_sort_key(item):
     return item[1]
 
 if __name__ == "__main__":
+    run_eval(0.2)
     short = run_eval(0.5)
     long = run_eval(3.0)
 
