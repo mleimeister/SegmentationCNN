@@ -14,7 +14,7 @@ import os, sys
 import numpy as np
 import pandas as pd
 from feature_extraction import compute_features, normalize_features_per_band
-from evaluation import post_processing
+from evaluation import post_processing, choose_preds
 from train_segmentation_cnn import build_model
 import peakutils
 
@@ -26,19 +26,23 @@ context_length = 65
 padding = int(context_length / 2)
 
 
-def compute_cnn_predictions(mls_features, sslm_features):
-    """
-    Apply pretrained CNN model to features and return predictions.
-    """
+def build_full_model():
     model = build_model(num_mel_bands, context_length, context_length)
     model.load_weights(model_weights)
     model.compile(loss='binary_crossentropy', optimizer='sgd')
+    return model
+
+def compute_cnn_predictions(mls_features, sslm_features, time_features):
+    """
+    Apply pretrained CNN model to features and return predictions.
+    """
+    model = build_full_model()
 
     mls_features = np.expand_dims(mls_features, 3)
     sslm_features = np.transpose(sslm_features, (2, 0, 1))
-    sslm_features = np.expand_dims(sslm_features, 3)
+    #sslm_features = sslm_features[:, :, :, 0] # remove chroma for now
 
-    predictions = model.predict([mls_features, sslm_features], batch_size=1)
+    predictions = model.predict([mls_features, sslm_features, time_features], batch_size=1)
 
     return predictions
 
@@ -55,7 +59,7 @@ def extract_features(audio_file, beats_file):
     beat_times = t[0].values
     beat_numbers = t[1].values
 
-    beat_mls, beat_sslm, beat_times = compute_features(audio_file)
+    beat_mls, sslm, time_features, beat_times = compute_features(audio_file)
     features = compute_context_windows(beat_mls)
 
     norm_data = np.load(normalization_path)
@@ -63,7 +67,7 @@ def extract_features(audio_file, beats_file):
     std_vec = norm_data['std_vec']
     features, mean_vec, std_vec = normalize_features_per_band(features, mean_vec, std_vec)
 
-    return features, beat_sslm, beat_times, beat_numbers
+    return features, sslm, time_features, beat_times
 
 
 def compute_context_windows(features):
@@ -103,7 +107,7 @@ def print_predictions(p, beat_times):
         print("%i:\t%.3f\t%.1f" % (i, p[i], beat_times[i]))
 
 
-def compute_segments_from_predictions(predictions, beat_times, beat_numbers):
+def compute_segments_from_predictions(predictions, beat_times):
     """
     Computes the segment times from a prediction curve and the beat times
     using peak picking.
@@ -113,14 +117,21 @@ def compute_segments_from_predictions(predictions, beat_times, beat_numbers):
     print("raw predicitions:")
     print_predictions(predictions, beat_times)
 
-    predictions = post_processing(predictions, beat_numbers, emphasize_downbeat=True)
+    if True:
+        peak_loc = choose_preds(predictions, beat_times)
+        segment_times = beat_times[peak_loc]
+        #print("after post-processing:")
+        #print_predictions(peak_loc, beat_times)
 
-    print("after post-processing:")
-    print_predictions(predictions, beat_times)
+    else:
+        predictions = post_processing(predictions)
 
-    predictions = np.insert(predictions, 0, 0)
-    peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.1) - 1
-    segment_times = beat_times[peak_loc]
+        print("after post-processing:")
+        print_predictions(predictions, beat_times)
+
+        predictions = np.insert(predictions, 0, 0)
+        peak_loc = peakutils.indexes(predictions, min_dist=8, thres=0.1) - 1
+        segment_times = beat_times[peak_loc]
 
     print("beat_num\ttime:")
     for i in peak_loc:
@@ -150,13 +161,13 @@ if __name__ == "__main__":
         os.system('DBNDownBeatTracker \'single\' "' + audio_file + '" -o "' + out_dir + file_name + '.beats.txt"')
 
     print("Computing features")
-    mls_features, sslm_features, beat_times, beat_numbers = extract_features(audio_file, out_dir + file_name + '.beats.txt')
+    mls_features, sslm, time_features, beat_times = extract_features(audio_file, out_dir + file_name + '.beats.txt')
 
     print("Computing CNN predictions")
-    predictions = compute_cnn_predictions(mls_features, sslm_features)
+    predictions = compute_cnn_predictions(mls_features, sslm, time_features)
 
     print("Get segment times")
-    segment_times = compute_segments_from_predictions(predictions, beat_times, beat_numbers)
+    segment_times = compute_segments_from_predictions(predictions, beat_times)
 
     print("\n")
     for f in segment_times:

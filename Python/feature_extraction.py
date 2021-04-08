@@ -36,7 +36,7 @@ from scipy.spatial import distance
 context_length = 65         # how many beats make up a context window for the CNN
 num_mel_bands = 80          # number of Mel bands
 neg_frames_factor = 5       # how many more negative examples than segment boundaries
-pos_frames_oversample = 5   # oversample positive frames because there are too few
+pos_frames_oversample = 5  # oversample positive frames because there are too few
 mid_frames_oversample = 3   # oversample frames between segments
 label_smearing = 1          # how many frames are positive examples around an annotation
 padding_length = int(context_length / 2)
@@ -44,11 +44,12 @@ padding_length = int(context_length / 2)
 max_pool = 2
 
 # for debugging
-# do_async = False
-# max_tracks = 1
-
-do_async = True
-max_tracks = None
+if False:
+    do_async = False
+    max_tracks = 1
+else:
+    do_async = True
+    max_tracks = None
 
 random.seed(1234)           # for reproducibility
 np.random.seed(1234)
@@ -144,6 +145,7 @@ def compute_chroma_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=
 
     chroma_fb = librosa.filters.chroma(22050, fft_size, n_chroma=12)
     chromagram = np.dot(chroma_fb, x_prime)
+    chromagram = librosa.power_to_db(chromagram,ref=np.max)
 
     return compute_sslm(chromagram + 1, beat_times, hop_size)
 
@@ -181,6 +183,16 @@ def compute_beat_mls(features, beat_times, mel_bands=num_mel_bands, fft_size=102
 
     return beat_melspec
 
+def compute_time_features(features, beat_times):
+    length = len(features) / 22050.
+    time_ratios = np.zeros((len(beat_times), 500), dtype=np.float32)
+
+    for k in range(len(beat_times)):
+        time_ratios[k, int((beat_times[k] * 500) // length)] = 1.0
+
+    return time_ratios
+
+
 def load_waveform(filename):
     if "/" in filename:
         path = filename
@@ -205,8 +217,14 @@ def with_audio_cache(filename, ext, waveform, beat_times, genf):
         np.save(path, data)
         return data, waveform
 
+def make_beat_time_features(beat_numbers):
+    times = np.zeros((len(beat_numbers), 4))
+    for i in range(len(beat_numbers)):
+        times[i][beat_numbers[i] - 1] = 1
+    return times
+
 def compute_features(f):
-    beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
+    beat_times, beat_numbers = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path, include_beat_numbers=True)
 
     def gen_beat_mls(waveform, beat_times):
         beat_mls = compute_beat_mls(waveform, beat_times)
@@ -216,11 +234,14 @@ def compute_features(f):
     waveform = None
     beat_mls, waveform = with_audio_cache(f, '.mls.npy', waveform, beat_times, gen_beat_mls)
     beat_mls_sslm, waveform = with_audio_cache(f, '.mls_sslm.npy', waveform, beat_times, compute_mls_sslm)
-    chroma_sslm, waveform = with_audio_cache(f, '.chroma_sslm.npy', waveform, beat_times, compute_chroma_sslm)
+    #times, waveform = with_audio_cache(f, '.beat_time_ratios.npy', waveform, beat_times, compute_time_features)
+    times = make_beat_time_features(beat_numbers)
 
-    beat_sslm = np.stack((beat_mls_sslm, chroma_sslm), axis=3)
+    #chroma_sslm, waveform = with_audio_cache(f, '.chroma_sslm.npy', waveform, beat_times, compute_chroma_sslm)
 
-    return beat_mls, beat_sslm, chroma_sslm, beat_times
+    #beat_sslm = np.stack((beat_mls_sslm, chroma_sslm), axis=3)
+
+    return beat_mls, beat_mls_sslm, times, beat_times
 
 def compute_features_async(logger, f, i, audio_files):
     logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
@@ -240,6 +261,7 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
 
     feature_list = []
     sslm_feature_list = []
+    time_feature_list = []
     labels_list = []
     failed_tracks_idx = []
 
@@ -262,14 +284,14 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
                     async_res[i].get()
 
                     # now reload them in mmap
-                    beat_mls, beat_sslm, chroma_sslm, beat_times = compute_features(f)
+                    beat_mls, beat_sslm, time_features, beat_times = compute_features(f)
                 except Exception as inst:
                     print("error processing {}".format(f))
                     print(inst)
                     failed_tracks_idx.append(i)
                     continue
             else:
-                beat_mls, beat_sslm, chroma_sslm, beat_times = compute_features_async(logger, f, i, audio_files)
+                beat_mls, beat_sslm, time_features, beat_times = compute_features(f)
 
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
@@ -286,13 +308,14 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
 
             feature_list.append(beat_mls)
             sslm_feature_list.append(beat_sslm)
+            time_feature_list.append(time_features)
             labels_list.append(label_vec)
 
             if max_tracks is not None and n_tracks > max_tracks:
                 break
             n_tracks += 1
 
-    return feature_list, sslm_feature_list, labels_list, failed_tracks_idx
+    return feature_list, sslm_feature_list, time_feature_list, labels_list, failed_tracks_idx
 
 
 def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample=10000):
@@ -328,7 +351,7 @@ def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample
     return features, mean_vec, std_vec
 
 
-def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training=True):
+def prepare_batch_data(feature_list, sslm_feature_list, time_feature_list, labels_list, is_training=True):
     """
     Reads precomputed beat Mel spectrograms and slices them into context windows
     for CNN training. For the training set, subsampling is
@@ -344,7 +367,8 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
 
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
-    data_sslm_x = np.zeros(shape=(n_preallocate, context_length, context_length, 2), dtype=np.float32)
+    data_sslm_x = np.zeros(shape=(n_preallocate, context_length, context_length), dtype=np.float32)
+    data_time_x = np.zeros(shape=(n_preallocate, time_feature_list[0].shape[1]), dtype=np.float32)
     data_y = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     data_weight = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     track_idx = np.zeros(shape=(n_preallocate,), dtype=int)
@@ -352,8 +376,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
     feature_count = 0
     current_track = 0
 
-    for features, sslm_features, labels in zip(feature_list, sslm_feature_list, labels_list):
-
+    for features, sslm_features, time_features, labels in zip(feature_list, sslm_feature_list, time_feature_list, labels_list):
         print("Processed {} examples from {} tracks".format(feature_count, current_track+1))
 
         num_beats = features.shape[1]
@@ -363,6 +386,17 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
 
         labels = np.concatenate((np.zeros(padding_length), labels, np.zeros(padding_length)), axis=0)
 
+        def add_feature(idx, label, weight=1):
+            nonlocal feature_count
+            data_x[feature_count, :, :] = features[:, idx - padding_length: idx + padding_length + 1]
+            data_sslm_x[feature_count] = sslm_features[:, :, idx - padding_length]
+            data_time_x[feature_count] = time_features[idx - padding_length]
+            data_y[feature_count] = label
+            data_weight[feature_count] = weight
+            track_idx[feature_count] = current_track
+
+            feature_count += 1
+
         if is_training is True:
 
             # take all positive frames.  these are indexes into the already padded features.
@@ -371,36 +405,15 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
             for rep in range(pos_frames_oversample):
 
                 for k in positive_frames_idx:
+                    add_feature(k, label=1)
 
-                    next_window = features[:, k - padding_length: k + padding_length + 1]
-                    next_label = 1
-                    next_weight = 1
-
-                    data_x[feature_count, :, :] = next_window
-                    data_sslm_x[feature_count] =  sslm_features[:, :, k - padding_length]
-                    data_y[feature_count] = next_label
-                    data_weight[feature_count] = next_weight
-                    track_idx[feature_count] = current_track
-
-                    feature_count += 1
-
-                    # apply label smearing: set labels around annotation to 1 and give them a triangular weight
+                    ## apply label smearing: set labels around annotation to 1 and give them a triangular weight
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
                         # don't smear into padding.
                         if padding_length <= l < num_beats + padding_length and l != k:
-
-                            next_window = features[:, l-padding_length: l+padding_length+1]
-                            next_label = 1
                             next_weight = 1. - np.abs(l-k) / (label_smearing + 1.)
-
-                            data_x[feature_count, :, :] = next_window
-                            data_sslm_x[feature_count] =  sslm_features[:, :, l - padding_length]
-                            data_y[feature_count] = next_label
-                            data_weight[feature_count] = next_weight
-                            track_idx[feature_count] = current_track
-
-                            feature_count += 1
+                            add_feature(l, label=0.5, weight=next_weight)
 
             # take all frames in the middle between two boundaries (typical false positives)
             mid_segment_frames_idx = (positive_frames_idx[1:] + positive_frames_idx[:-1]) / 2
@@ -412,16 +425,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
                         if padding_length <= l < num_beats + padding_length:
-
-                            next_window = features[:, l-padding_length: l+padding_length+1]
-
-                            data_sslm_x[feature_count] =  sslm_features[:, :, l - padding_length]
-                            data_x[feature_count, :, :] = next_window
-                            data_y[feature_count] = 0
-                            data_weight[feature_count] = 1
-                            track_idx[feature_count] = current_track
-
-                            feature_count += 1
+                            add_feature(l, label=0)
 
             # sample randomly from the remaining frames
             remaining_frames_idx = []
@@ -434,33 +438,11 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
             for k in range(num_neg_frames):
                 next_idx = random.sample(remaining_frames_idx, 1)[0]
 
-                next_window = features[:, next_idx-padding_length: next_idx+padding_length+1]
-                next_label = 0
-                next_weight = 1
-
-                data_x[feature_count, :, :] = next_window
-                data_sslm_x[feature_count] =  sslm_features[:, :, next_idx - padding_length]
-                data_y[feature_count] = next_label
-                data_weight[feature_count] = next_weight
-                track_idx[feature_count] = current_track
-
-                feature_count += 1
+                add_feature(next_idx, label=0)
 
         else:   # test data -> extract all context windows and keep track of track indices
             for k in range(padding_length, num_beats + padding_length):
-
-                next_window = features[:, k-padding_length: k+padding_length+1]
-                next_label = labels[k]
-                next_weight = 1
-
-                data_x[feature_count, :, :] = next_window
-                data_y[feature_count] = next_label
-                data_sslm_x[feature_count] = sslm_features[:, :, k - padding_length]
-
-                data_weight[feature_count] = next_weight
-                track_idx[feature_count] = current_track
-
-                feature_count += 1
+                add_feature(k, label=labels[k])
 
         current_track += 1
 
@@ -468,12 +450,13 @@ def prepare_batch_data(feature_list, sslm_feature_list, labels_list, is_training
             break
 
     data_x = data_x[:feature_count, :, :]
-    data_sslm_x.resize((feature_count, data_sslm_x.shape[1], data_sslm_x.shape[2], data_sslm_x.shape[3]))
+    data_sslm_x.resize((feature_count, data_sslm_x.shape[1], data_sslm_x.shape[2]))
+    data_time_x.resize((feature_count, data_time_x.shape[1]))
     data_y = data_y[:feature_count]
     data_weight = data_weight[:feature_count]
     track_idx = track_idx[:feature_count]
 
-    return data_x, data_sslm_x, data_y, data_weight, track_idx
+    return data_x, data_sslm_x, data_time_x, data_y, data_weight, track_idx
 
 
 def load_raw_features(file):
@@ -502,13 +485,13 @@ if __name__ == "__main__":
 
     print("Extracting MLS features")
 
-    train_features, train_sslm_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,
-                                                                                  paths.beats_path,
-                                                                                  paths.annotations_path)
+    train_features, train_sslm_features, train_time_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,
+            paths.beats_path,
+            paths.annotations_path)
 
-    test_features, test_sslm_features, test_labels, test_failed_idx = batch_extract_mls_and_labels(test_files,
-                                                                               paths.beats_path,
-                                                                               paths.annotations_path)
+    test_features, test_sslm_features, test_time_features, test_labels, test_failed_idx = batch_extract_mls_and_labels(test_files,
+            paths.beats_path,
+            paths.annotations_path)
 
     print("Extracted features for {} training and {} test tracks".format(len(train_features), len(test_features)))
 
@@ -524,8 +507,8 @@ if __name__ == "__main__":
 
     # train_features, train_labels, test_features, test_labels = load_raw_features('../Data/rawFeatures.pickle')
 
-    train_x, train_sslm_x, train_y, train_weights, train_idx = prepare_batch_data(train_features, train_sslm_features, train_labels, is_training=True)
-    test_x, test_sslm_x, test_y, test_weights, test_idx = prepare_batch_data(test_features, test_sslm_features, test_labels, is_training=False)
+    train_x, train_sslm_x, train_time_x, train_y, train_weights, train_idx = prepare_batch_data(train_features, train_sslm_features, train_time_features,  train_labels, is_training=True)
+    test_x, test_sslm_x, test_time_x, test_y, test_weights, test_idx = prepare_batch_data(test_features, test_sslm_features, test_time_features, test_labels, is_training=False)
 
     train_x, mean_vec, std_vec = normalize_features_per_band(train_x)
     test_x, mean_vec, std_vec = normalize_features_per_band(test_x, mean_vec, std_vec)
@@ -533,8 +516,8 @@ if __name__ == "__main__":
     print("Prepared {} training items and {} test items".format(train_x.shape[0], test_x.shape[0]))
 
     # store normalized features for CNN training
-    np.savez('../Data/trainDataNormalized.npz', train_x=train_x, train_sslm_x=train_sslm_x, train_y=train_y, train_weights=train_weights)
-    np.savez('../Data/testDataNormalized.npz', test_x=test_x, test_sslm_x=test_sslm_x, test_y=test_y, test_weights=test_weights)
+    np.savez('../Data/trainDataNormalized.npz', train_x=train_x, train_sslm_x=train_sslm_x, train_time_x=train_time_x, train_y=train_y, train_weights=train_weights)
+    np.savez('../Data/testDataNormalized.npz', test_x=test_x, test_sslm_x=test_sslm_x, test_time_x=test_time_x, test_y=test_y, test_weights=test_weights)
     np.savez('../Data/normalization.npz', mean_vec=mean_vec, std_vec=std_vec)
 
     # store file lists and index mapping to training and test data
