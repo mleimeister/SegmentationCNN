@@ -32,16 +32,7 @@ import scipy
 import skimage.measure
 from scipy.spatial import distance
 
-
-context_length = 65         # how many beats make up a context window for the CNN
-num_mel_bands = 80          # number of Mel bands
-neg_frames_factor = 5       # how many more negative examples than segment boundaries
-pos_frames_oversample = 5  # oversample positive frames because there are too few
-mid_frames_oversample = 3   # oversample frames between segments
-label_smearing = 1          # how many frames are positive examples around an annotation
-padding_length = int(context_length / 2)
-
-max_pool = 2
+from parameters import *
 
 # for debugging
 if False:
@@ -65,7 +56,7 @@ def compute_sslm(input_vector, beat_times, hop_size):
 
     x_hat_length = x_hat.shape[1]
 
-    sslm_shape = context_length * 3 # because we'll max pool it down at the end
+    sslm_shape = sslm_length * 3 # because we'll max pool it down at the end
 
     #Cosine distance calculation: D[N/p,L/p] matrix
     distances = np.full((x_hat_length, sslm_shape), 1.0, dtype=np.float32) #D has as dimensions N/p and L/p
@@ -95,7 +86,7 @@ def compute_sslm(input_vector, beat_times, hop_size):
     sslm = np.transpose(sslm)
 
     beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
-    beat_sslms = np.zeros((context_length, context_length, beat_frames.shape[0]), dtype=np.float32)
+    beat_sslms = np.zeros((sslm_length, sslm_length, beat_frames.shape[0]), dtype=np.float32)
 
     for k in range(beat_frames.shape[0]):
         sslm_frame = beat_frames[k] // max_pool
@@ -232,8 +223,8 @@ def compute_features(f):
         return beat_mls
 
     waveform = None
-    beat_mls, waveform = with_audio_cache(f, '.mls.npy', waveform, beat_times, gen_beat_mls)
-    beat_mls_sslm, waveform = with_audio_cache(f, '.mls_sslm.npy', waveform, beat_times, compute_mls_sslm)
+    beat_mls, waveform = with_audio_cache(f, '.mls_115.npy', waveform, beat_times, gen_beat_mls)
+    beat_mls_sslm, waveform = with_audio_cache(f, '.mls_sslm_115.npy', waveform, beat_times, compute_mls_sslm)
     #times, waveform = with_audio_cache(f, '.beat_time_ratios.npy', waveform, beat_times, compute_time_features)
     times = make_beat_time_features(beat_numbers)
 
@@ -331,6 +322,7 @@ def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample
 
     if mean_vec is None:
         # subsample features
+        print("sampling")
         idx = random.sample(range(features.shape[0]), min(features.shape[0], subsample))
         temp_features = features[idx, :, :]
 
@@ -345,8 +337,9 @@ def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample
         mean_vec = np.mean(temp_features, axis=0)
         std_vec = np.std(temp_features, axis=0)
 
-    features = features - mean_vec[np.newaxis, :, np.newaxis]
-    features = features / std_vec[np.newaxis, :, np.newaxis]
+    print("modifying...")
+    features -= mean_vec[np.newaxis, :, np.newaxis]
+    features /= std_vec[np.newaxis, :, np.newaxis]
 
     return features, mean_vec, std_vec
 
@@ -367,7 +360,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, time_feature_list, label
 
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
-    data_sslm_x = np.zeros(shape=(n_preallocate, context_length, context_length), dtype=np.float32)
+    data_sslm_x = np.zeros(shape=(n_preallocate, sslm_length, sslm_length), dtype=np.float32)
     data_time_x = np.zeros(shape=(n_preallocate, time_feature_list[0].shape[1]), dtype=np.float32)
     data_y = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     data_weight = np.zeros(shape=(n_preallocate,), dtype=np.float32)
@@ -407,7 +400,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, time_feature_list, label
                 for k in positive_frames_idx:
                     add_feature(k, label=1)
 
-                    ## apply label smearing: set labels around annotation to 1 and give them a triangular weight
+                    # apply label smearing: set labels around annotation to 1 and give them a triangular weight
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
                         # don't smear into padding.
@@ -449,7 +442,7 @@ def prepare_batch_data(feature_list, sslm_feature_list, time_feature_list, label
         if feature_count > n_preallocate:
             break
 
-    data_x = data_x[:feature_count, :, :]
+    data_x.resize((feature_count, data_x.shape[1], data_x.shape[2]))
     data_sslm_x.resize((feature_count, data_sslm_x.shape[1], data_sslm_x.shape[2]))
     data_time_x.resize((feature_count, data_time_x.shape[1]))
     data_y = data_y[:feature_count]
@@ -510,6 +503,7 @@ if __name__ == "__main__":
     train_x, train_sslm_x, train_time_x, train_y, train_weights, train_idx = prepare_batch_data(train_features, train_sslm_features, train_time_features,  train_labels, is_training=True)
     test_x, test_sslm_x, test_time_x, test_y, test_weights, test_idx = prepare_batch_data(test_features, test_sslm_features, test_time_features, test_labels, is_training=False)
 
+    print("normalizing features")
     train_x, mean_vec, std_vec = normalize_features_per_band(train_x)
     test_x, mean_vec, std_vec = normalize_features_per_band(test_x, mean_vec, std_vec)
 

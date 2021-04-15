@@ -12,12 +12,12 @@ import pickle
 import peakutils
 import mir_eval
 import paths
+import parameters
 
 from operator import itemgetter
 
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
-prediction_threshold = 0.3
 
 def load_data(preds_file, file_lists):
     """
@@ -62,7 +62,7 @@ def choose_preds(preds, beat_times):
         else:
             preds_out[i] = 0
 
-    return np.flatnonzero(preds_out > prediction_threshold)
+    return np.flatnonzero(preds_out > parameters.prediction_threshold)
 
 
 def post_processing(preds_track):

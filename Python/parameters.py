@@ -11,7 +11,7 @@ num_mel_bands = 80
 max_pool = 2
 
 # how far back to calculate the SSLM (note that actual length will be max_pool * sslm_length)
-sslm_length = 65
+sslm_length = 115
 
 # how many more negative examples than segment boundaries
 neg_frames_factor = 5

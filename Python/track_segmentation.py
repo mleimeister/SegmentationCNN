@@ -16,14 +16,12 @@ import pandas as pd
 from feature_extraction import compute_features, normalize_features_per_band
 from evaluation import post_processing, choose_preds
 from train_segmentation_cnn import build_model
-import peakutils
 
 normalization_path = '../Data/normalization.npz'
 model_weights = '../Data/model_weights_100epochs_lr005.h5'
 out_dir = '../Temp/'
-num_mel_bands = 80
-context_length = 65
-padding = int(context_length / 2)
+
+from parameters import context_length, num_mel_bands, padding_length
 
 
 def build_full_model():
@@ -79,8 +77,8 @@ def compute_context_windows(features):
 
     n_preallocate = 10000
 
-    features = np.hstack((0.001 * np.random.rand(num_mel_bands, padding), features,
-                         0.001 * np.random.rand(num_mel_bands, padding)))
+    features = np.hstack((0.001 * np.random.rand(num_mel_bands, padding_length), features,
+                         0.001 * np.random.rand(num_mel_bands, padding_length)))
 
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
@@ -88,11 +86,11 @@ def compute_context_windows(features):
     feature_count = 0
     num_padded_features = features.shape[1]
 
-    for k in range(padding, num_padded_features - padding):
+    for k in range(padding_length, num_padded_features - padding_length):
         if feature_count > n_preallocate:
             break
 
-        next_window = features[:, k-padding: k+padding+1]
+        next_window = features[:, k-padding_length: k+padding_length+1]
         data_x[feature_count, :, :] = next_window
         feature_count += 1
 
