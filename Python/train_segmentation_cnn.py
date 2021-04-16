@@ -39,7 +39,7 @@ def load_training_data(dataset):
     :return train_weights (n_items x 1)
     """
 
-    data = np.load(dataset)
+    data = np.load(dataset, mmap_mode='r')
     return data['train_x'], data['train_sslm_x'], data['train_time_x'], data['train_y'], data['train_weights']
 
 
@@ -55,7 +55,7 @@ def load_test_data(dataset):
     :return test_weights (n_items x 1)
     """
 
-    data = np.load(dataset)
+    data = np.load(dataset, mmap_mode='r')
     return data['test_x'], data['test_sslm_x'], data['test_time_x'], data['test_y'], data['test_weights']
 
 

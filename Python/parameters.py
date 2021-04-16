@@ -2,8 +2,7 @@
 prediction_threshold = 0.3
 
 # should we include (MLS, SSLM, beat #) features when training?
-#training_features = {'mls', 'sslm', 'beat_numbers'}
-training_features = {'mls', 'beat_numbers'}
+training_features = {'mls', 'sslm', 'beat_numbers'}
 
 # how many beats make up a context window for the MLS part of the network
 context_length = 115
