@@ -25,6 +25,7 @@ from keras.optimizers import SGD
 
 np.random.seed(1235)  # for reproducibility
 
+import parameters
 
 def load_training_data(dataset):
     """
@@ -59,15 +60,29 @@ def load_test_data(dataset):
 
 
 def build_model(mls_rows, mls_cols, sslm_shape):
-    mls_input = layers.Input(shape=(mls_rows, mls_cols, 1), name='mls_input')
-    mls = layers.Conv2D(16, (6, 8), activation='relu', name='mls_conv')(mls_input)
-    mls = layers.MaxPooling2D(pool_size=(3, 6), name='mls_maxpool')(mls)
+    inputs = []
+    merged_input = []
 
-    sslm_input = layers.Input(shape=(sslm_shape, sslm_shape, 1), name='sslm_input')
-    sslm = layers.Conv2D(16, (8, 8), activation='relu', name='sslm_conv')(sslm_input)
-    sslm = layers.MaxPooling2D(pool_size=(6, 6), name='sslm_maxpool')(sslm)
+    if 'mls' in parameters.training_features:
+        mls_input = layers.Input(shape=(mls_rows, mls_cols, 1), name='mls_input')
+        mls = layers.Conv2D(16, (6, 8), activation='relu', name='mls_conv')(mls_input)
+        mls = layers.MaxPooling2D(pool_size=(3, 6), name='mls_maxpool')(mls)
+        merged_input.append(mls)
+        inputs.append(mls_input)
 
-    merged = layers.Concatenate(axis=1, name='mls_slsm_concat')([mls, sslm])
+    if 'sslm' in parameters.training_features:
+        sslm_input = layers.Input(shape=(sslm_shape, sslm_shape, 1), name='sslm_input')
+        sslm = layers.Conv2D(16, (8, 8), activation='relu', name='sslm_conv')(sslm_input)
+        sslm = layers.MaxPooling2D(pool_size=(6, 6), name='sslm_maxpool')(sslm)
+
+        merged_input.append(sslm)
+        inputs.append(sslm_input)
+
+    if len(merged_input) > 1:
+        merged = layers.Concatenate(axis=1, name='mls_sslm_concat')(merged_input)
+    else:
+        merged = merged_input[0]
+
     merged = layers.Conv2D(64, (6, 3), activation='relu', name='concat_conv')(merged)
     merged = layers.Dropout(0.5, name='concat_dropout')(merged)
 
@@ -76,13 +91,34 @@ def build_model(mls_rows, mls_cols, sslm_shape):
     merged = layers.Dense(256, activation='relu', name='final_dense')(merged)
     merged = layers.Dropout(0.5, name='final_dropout')(merged)
 
-    time_input = layers.Input(shape=(4,), name='time_input')
-    time = layers.Dense(1, activation='relu', name='time_dense')(time_input)
-    merged = layers.Concatenate(name='final_concat')([merged, time])
+    final_dense_input = [merged]
+    if 'beat_numbers' in parameters.training_features:
+        time_input = layers.Input(shape=(4,), name='time_input')
+        time = layers.Dense(1, activation='relu', name='time_dense')(time_input)
+        final_dense_input.append(time)
+        inputs.append(time_input)
+
+    if len(final_dense_input) > 1:
+        merged = layers.Concatenate(name='final_concat')(final_dense_input)
+    else:
+        merged = final_dense_input[0]
 
     merged = layers.Dense(1, activation='sigmoid', name='final_sigmoid')(merged)
 
-    return Model(inputs=[mls_input, sslm_input, time_input], outputs = merged)
+    return Model(inputs=inputs, outputs = merged)
+
+def make_input(mls, sslm, time):
+    input = []
+    if 'mls' in parameters.training_features:
+        input.append(mls)
+
+    if 'sslm' in parameters.training_features:
+        input.append(sslm)
+
+    if 'beat_numbers' in parameters.training_features:
+        input.append(time)
+
+    return input
 
 def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
     """
@@ -100,7 +136,12 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     print('training data size:')
     print(X_train.shape)
 
+    img_rows = X_train.shape[1]
+    img_cols = X_train.shape[2]
+    model = build_model(img_rows, img_cols, x_sslm_train.shape[1])
+
     p = np.random.permutation(X_train.shape[0])
+
     X_train = X_train[p, :, :]
     x_sslm_train = x_sslm_train[p, :, :]
     x_time_train = x_time_train[p]
@@ -111,10 +152,6 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     X_train = np.expand_dims(X_train, 3)
     x_sslm_train = np.expand_dims(x_sslm_train, 3)
 
-    img_rows = X_train.shape[1]
-    img_cols = X_train.shape[2]
-
-    model = build_model(img_rows, img_cols, x_sslm_train.shape[1])
 
     if weights_file is not None:
         model.load_weights(weights_file)
@@ -125,7 +162,8 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     early_stopping = EarlyStopping(monitor='val_loss', patience=15)
 
     print('train model...')
-    model.fit(x=[X_train, x_sslm_train, x_time_train], y=y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+
+    model.fit(x=make_input(X_train, x_sslm_train, x_time_train), y=y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
               verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[early_stopping])
 
     print('load test data...')
@@ -135,12 +173,12 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     x_sslm_test = np.expand_dims(x_sslm_test, 3)
 
     print('predict test data...')
-    preds = model.predict([X_test, x_sslm_test, x_time_test], batch_size=1, verbose=1)
+    preds = model.predict(make_input(X_test, x_sslm_test, x_time_test), batch_size=1, verbose=1)
 
     print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
-    score = model.evaluate([X_test, x_sslm_test, x_time_test], y_test, verbose=1)
+    score = model.evaluate(make_input(X_test, x_sslm_test, x_time_test), y_test, verbose=1)
     print('Test score:', score)
 
     # save model
