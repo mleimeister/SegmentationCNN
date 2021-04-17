@@ -89,15 +89,23 @@ def get_segment_times(audio_file, annotation_folder):
 
     # for some tracks, only one annotation is available, take first one as default
     # if there is no annotation available, store -1 as error code
+
     try:
-        label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
+        label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile3_uppercase.txt')
         t = pd.read_table(label_file, header=None)
     except IOError:
         try:
-            label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
+            label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile1_uppercase.txt')
             t = pd.read_table(label_file, header=None)
         except IOError:
-            return -1
+            try:
+                label_file = os.path.join(annotation_folder, file_name, 'parsed', 'textfile2_uppercase.txt')
+                t = pd.read_table(label_file, header=None)
+            except IOError:
+                return -1
+
+    if t[1].dtype == 'O':
+        t = t[~(t[1].str.lower().isin(['silence', 'end']))]
 
     segment_times = t.iloc[:, 0].values
 

@@ -12,12 +12,12 @@ import pickle
 import peakutils
 import mir_eval
 import paths
+import parameters
 
 from operator import itemgetter
 
 predictions_path = '../Data/predsTestTracks_100epochs_lr005.npy'
 file_list_path = '../Data/fileListsAndIndex.pickle'
-
 
 def load_data(preds_file, file_lists):
     """
@@ -38,6 +38,33 @@ def load_data(preds_file, file_lists):
     return preds, test_files, test_idx
 
 
+def choose_preds(preds, beat_times):
+    # At test time, we apply the trained network to each position in the
+    # spectrogram of the music piece to be segmented, ob- taining a boundary
+    # probability for each frame. We then employ a simple means of peak-picking
+    # on this boundary activation curve: Every output value that is not
+    # surpassed within ±6 seconds is a boundary candidate. From each candidate
+    # value we subtract the average of the activation curve in the past 12 and
+    # future 6 seconds, to compensate for long-term trends. We end up with a
+    # list of boundary candidates along with strength values that can be
+    # thresh- olded at will. We found that more elaborate peak picking methods
+    # did not improve results.
+    preds_out = np.zeros((len(preds)))
+
+    for i in range(len(preds)):
+        pred_time = beat_times[i]
+        in_window = (beat_times > pred_time - 6) & (beat_times <= pred_time + 6)
+        max_in_window = np.argmax(np.where(in_window, preds, 0))
+        if i == max_in_window:
+            in_avg_window = (beat_times > pred_time - 12) & (beat_times <= pred_time + 6)
+            window_avg = np.mean(preds[in_avg_window])
+            preds_out[i] = preds[i] - window_avg
+        else:
+            preds_out[i] = 0
+
+    return np.flatnonzero(preds_out > parameters.prediction_threshold)
+
+
 def post_processing(preds_track):
     """
     Post processing of prediction probabilities, applies smoothing
@@ -47,12 +74,12 @@ def post_processing(preds_track):
     :return: post-processed predictions
     """
 
-    # smoothing
     preds_track = np.convolve(preds_track, np.hamming(4) / np.sum(np.hamming(4)), 'same')
 
     # emphasize peaks
-    preds_track = np.multiply(preds_track,
-                              np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
+    if len(preds_track) >= 32:
+        preds_track = np.multiply(preds_track,
+                                  np.convolve(preds_track, np.hamming(32) / np.sum(np.hamming(32)), 'same'))
 
 
     # unit maximum
@@ -60,6 +87,8 @@ def post_processing(preds_track):
 
     return preds_track
 
+def get_sort_key(item):
+    return item[1]
 
 def run_eval(f_measure_thresh):
     f_measures = []
@@ -74,20 +103,16 @@ def run_eval(f_measure_thresh):
         segment_times = get_segment_times(f, paths.annotations_path)
 
         # get beat times
-        beat_times = get_beat_times(f, paths.beats_path)
+        beat_times, beat_numbers = get_beat_times(f, paths.beats_path, include_beat_numbers=True)
 
         # get predictions for current track
         preds_track = np.squeeze(np.asarray(preds[test_idx == i]))
 
-        # post processing
-        preds_track = post_processing(preds_track)
+        if len(preds_track) == 0:
+            continue
 
-        # insert a zero value at the beginning of the predictions to help the peak-finding algorithm
-        # identify the first beat of a track
-
-        peds_track = np.insert(preds_track, 0, 0)
-        peak_loc = peakutils.indexes(preds_track, min_dist=8, thres=0.1) - 1
-        pred_times = beat_times[peak_loc]
+        pred_indexes = choose_preds(preds_track, beat_times)
+        pred_times = beat_times[pred_indexes]
 
         # compute f-measure
         f_score, p, r = mir_eval.onset.f_measure(np.sort(segment_times), np.sort(pred_times), window=f_measure_thresh)
@@ -101,13 +126,13 @@ def run_eval(f_measure_thresh):
     mean_r = np.mean(np.asarray(recalls))
 
     print("mean f-Measure for {}: {}, precision: {}, recall: {}".format(f_measure_thresh, mean_f, mean_p, mean_r))
-
     return list(zip(test_files, f_measures, precisions, recalls))
 
 def get_sort_key(item):
     return item[1]
 
 if __name__ == "__main__":
+    run_eval(0.2)
     short = run_eval(0.5)
     long = run_eval(3.0)
 

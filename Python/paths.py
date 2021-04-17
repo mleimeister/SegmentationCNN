@@ -17,9 +17,14 @@ mls_path = '../Audio/features'
 # where to find SALAMI annotations
 annotations_path =  '../Data/salami-data-public/annotations/'
 
+viz_path = '../Audio/viz'
+
 def remove_suffix(filename):
      return os.path.splitext(os.path.basename(filename))[0]
 
-def get_mls_path(audio_filename):
-     return os.path.join(mls_path, remove_suffix(audio_filename) + '.mls.npy')
+def with_suffix(path, ext):
+     return remove_suffix(path) + '.' + ext
+
+def get_audio_cache_path(audio_filename, ext):
+     return os.path.join(mls_path, remove_suffix(audio_filename) + ext)
 
