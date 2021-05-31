@@ -20,24 +20,127 @@ import librosa
 import random
 import pickle
 import paths
+import warnings
+import time
+import pdb
 
 import multiprocessing, logging
+from contextlib import contextmanager
 
 from utils import *
 import scipy
+import skimage.measure
+from scipy.spatial import distance
 
-context_length = 65         # how many beats make up a context window for the CNN
-num_mel_bands = 80          # number of Mel bands
-neg_frames_factor = 5       # how many more negative examples than segment boundaries
-pos_frames_oversample = 5   # oversample positive frames because there are too few
-mid_frames_oversample = 3   # oversample frames between segments
-label_smearing = 1          # how many frames are positive examples around an annotation
+from parameters import *
+
+# for debugging
+if False:
+    do_async = False
+    max_tracks = 1
+else:
+    do_async = True
+    max_tracks = None
 
 random.seed(1234)           # for reproducibility
 np.random.seed(1234)
 
+def debug_signal_handler(signal, frame):
+    pdb.set_trace()
 
-def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+def compute_sslm(input_vector, beat_times, hop_size):
+    # stack (bag?) two frames
+    m = 2
+    x = [np.roll(input_vector,n,axis=1) for n in range(m)]
+    x_hat = np.concatenate(x, axis=0)
+
+    x_hat_length = x_hat.shape[1]
+
+    sslm_shape = sslm_length * 3 # because we'll max pool it down at the end
+
+    #Cosine distance calculation: D[N/p,L/p] matrix
+    distances = np.full((x_hat_length, sslm_shape), 1.0, dtype=np.float32) #D has as dimensions N/p and L/p
+    for i in range(x_hat_length):
+        for l in range(sslm_shape):
+            # note that negative indices here make our matrix 'time-circular'
+            cosine_dist = distance.cosine(x_hat[:,i], x_hat[:,i-(l+1)]) #cosine distance between columns i and i-L
+            distances[i,l] = cosine_dist
+
+    #Threshold epsilon[N/p,L/p] calculation
+    kappa = 0.1 #equalization factor of 10%
+
+    epsilon_buf = np.empty((sslm_shape, sslm_shape * 2), dtype=np.float32)
+    epsilon = np.empty((distances.shape[0], sslm_shape), dtype=np.float32)
+
+    for i in range(distances.shape[0]):
+        for l in range(sslm_shape):
+            epsilon_buf[l] = np.concatenate((distances[i-(l+1),:], distances[i,:]))
+
+        epsilon[i] = np.quantile(epsilon_buf, kappa, axis=1)
+        for l in range(sslm_shape):
+            if epsilon[i, l] == 0:
+                epsilon[i,l] = 0.000000001
+
+
+    sslm = scipy.special.expit(1-distances/epsilon) # sigmoid
+    sslm = np.transpose(sslm)
+
+    beat_frames = np.round(beat_times * (22050. / hop_size)).astype('int')
+    beat_sslms = np.zeros((sslm_length, sslm_length, beat_frames.shape[0]), dtype=np.float32)
+
+    for k in range(beat_frames.shape[0]):
+        sslm_frame = beat_frames[k] // max_pool
+        sslm_frame_min = sslm_frame - sslm_shape // 2
+        sslm_frame_max = sslm_frame + sslm_shape // 2 + 1
+        beat_sslm = np.take(sslm, range(sslm_frame_min, sslm_frame_max), mode='wrap', axis=1)
+        beat_sslms[:,:,k] = skimage.measure.block_reduce(beat_sslm, (3,3), np.max)
+
+    return beat_sslms
+
+
+
+def compute_mls_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+    """
+    Compute self-similarilty lag matrix (SSLM) using mel-log spectrogram as input
+
+    :param waveform: raw waveform data
+    :param beat_times: list of beat times in seconds
+    :param mel_bands: number of Mel bands
+    :param fft_size: FFT size
+    :param hop_size: hop size for FFT processing
+    :return: beat sslm
+    """
+    spec = np.abs(librosa.stft(y=waveform, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
+                               window=scipy.signal.hamming))
+
+    mel_fb = librosa.filters.mel(sr=22050, n_fft=fft_size, n_mels=mel_bands, fmin=50, fmax=10000, htk=True)
+    s = np.sum(mel_fb, axis=1)
+    mel_fb = np.divide(mel_fb, s[:, np.newaxis])
+
+    mel_spec = np.dot(mel_fb, spec)
+
+    S_to_dB = librosa.power_to_db(mel_spec,ref=np.max)
+
+    # first max-pooling: by 2.
+    x_prime = skimage.measure.block_reduce(S_to_dB, (1,max_pool), np.max)
+
+    MFCCs = scipy.fftpack.dct(x_prime, axis=0, type=2, norm='ortho')
+    MFCCs = MFCCs[1:,:] + 1
+
+    return compute_sslm(MFCCs, beat_times, hop_size)
+
+def compute_chroma_sslm(waveform, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
+    spec = librosa.stft(y=waveform, n_fft=fft_size, hop_length=hop_size, win_length=fft_size, window=scipy.signal.hamming)
+    spec = np.abs(spec)
+    x_prime = skimage.measure.block_reduce(spec, (1,max_pool), np.max)
+
+    chroma_fb = librosa.filters.chroma(22050, fft_size, n_chroma=12)
+    chromagram = np.dot(chroma_fb, x_prime)
+    chromagram = librosa.power_to_db(chromagram,ref=np.max)
+
+    return compute_sslm(chromagram + 1, beat_times, hop_size)
+
+def compute_beat_mls(features, beat_times, mel_bands=num_mel_bands, fft_size=1024, hop_size=512):
     """
     Compute average Mel log spectrogram per beat given previously
     extracted beat times.
@@ -49,21 +152,7 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
     :param hop_size: hop size for FFT processing
     :return: beat Mel spectrogram (mel_bands x frames)
     """
-
-    computed_mls_file = paths.get_mls_path(filename)
-
-    if os.path.exists(computed_mls_file):
-        return np.load(computed_mls_file)
-
-
-    if "/" in filename:
-        path = filename
-    else:
-        path = os.path.join(paths.audio_path, filename)
-
-    y, sr = librosa.load(path, sr=22050, mono=True)
-
-    spec = np.abs(librosa.stft(y=y, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
+    spec = np.abs(librosa.stft(y=features, n_fft=fft_size, hop_length=hop_size, win_length=fft_size,
                                window=scipy.signal.hamming))
 
     mel_fb = librosa.filters.mel(sr=22050, n_fft=fft_size, n_mels=mel_bands, fmin=50, fmax=10000, htk=True)
@@ -83,20 +172,71 @@ def compute_beat_mls(filename, beat_times, mel_bands=num_mel_bands, fft_size=102
 
     beat_melspec = np.column_stack((beat_melspec, mel_spec[:, beat_frames.shape[0]]))
 
-    np.save(computed_mls_file, beat_melspec)
-
-    beat_melspec = np.column_stack((beat_melspec, mel_spec[:, beat_frames.shape[0]]))
     return beat_melspec
 
+def compute_time_features(features, beat_times):
+    length = len(features) / 22050.
+    time_ratios = np.zeros((len(beat_times), 500), dtype=np.float32)
 
-def compute_features(logger, f, i, audio_files):
+    for k in range(len(beat_times)):
+        time_ratios[k, int((beat_times[k] * 500) // length)] = 1.0
+
+    return time_ratios
+
+
+def load_waveform(filename):
+    if "/" in filename:
+        path = filename
+    else:
+        path = os.path.join(paths.audio_path, filename)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        y, sr = librosa.load(path, sr=22050, mono=True)
+        return y
+
+def with_audio_cache(filename, ext, waveform, beat_times, genf):
+    path = paths.get_audio_cache_path(filename, ext)
+
+    if os.path.exists(path):
+        return np.load(path,  mmap_mode='r'), waveform
+    else:
+        if waveform is None:
+            waveform = load_waveform(filename)
+
+        data = genf(waveform, beat_times)
+        np.save(path, data)
+        return data, waveform
+
+def make_beat_time_features(beat_numbers):
+    times = np.zeros((len(beat_numbers), 4))
+    for i in range(len(beat_numbers)):
+        times[i][beat_numbers[i] - 1] = 1
+    return times
+
+def compute_features(f):
+    beat_times, beat_numbers = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path, include_beat_numbers=True)
+
+    def gen_beat_mls(waveform, beat_times):
+        beat_mls = compute_beat_mls(waveform, beat_times)
+        beat_mls /= np.max(beat_mls)
+        return beat_mls
+
+    waveform = None
+    beat_mls, waveform = with_audio_cache(f, '.mls_115.npy', waveform, beat_times, gen_beat_mls)
+    beat_mls_sslm, waveform = with_audio_cache(f, '.mls_sslm_115.npy', waveform, beat_times, compute_mls_sslm)
+    #times, waveform = with_audio_cache(f, '.beat_time_ratios.npy', waveform, beat_times, compute_time_features)
+    times = make_beat_time_features(beat_numbers)
+
+    #chroma_sslm, waveform = with_audio_cache(f, '.chroma_sslm.npy', waveform, beat_times, compute_chroma_sslm)
+
+    #beat_sslm = np.stack((beat_mls_sslm, chroma_sslm), axis=3)
+
+    return beat_mls, beat_mls_sslm, times, beat_times
+
+def compute_features_async(logger, f, i, audio_files):
     logger.info("Track {} / {} ({})".format(i, len(audio_files), f))
-
-    beat_times = get_beat_times(os.path.join(paths.audio_path, f), paths.beats_path)
-
-    beat_mls = compute_beat_mls(f, beat_times)
-    beat_mls /= np.max(beat_mls)
-    return beat_mls, beat_times
+    compute_features(f)
 
 def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     """
@@ -111,20 +251,39 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
     """
 
     feature_list = []
+    sslm_feature_list = []
+    time_feature_list = []
     labels_list = []
     failed_tracks_idx = []
+
 
     async_res = []
 
     logger = multiprocessing.log_to_stderr()
     logger.setLevel(logging.INFO)
 
+    n_tracks = 0
     with multiprocessing.Pool(processes=8) as pool:
-        for i, f in enumerate(audio_files):
-            async_res.append(pool.apply_async(compute_features, (logger, f, i, audio_files, )))
+        if do_async:
+            for i, f in enumerate(audio_files):
+                async_res.append(pool.apply_async(compute_features_async, (logger, f, i, audio_files, )))
 
         for i, f in enumerate(audio_files):
-            beat_mls, beat_times = async_res[i].get()
+            if do_async:
+                try:
+                    # have child process actually write features to disk
+                    async_res[i].get()
+
+                    # now reload them in mmap
+                    beat_mls, beat_sslm, time_features, beat_times = compute_features(f)
+                except Exception as inst:
+                    print("error processing {}".format(f))
+                    print(inst)
+                    failed_tracks_idx.append(i)
+                    continue
+            else:
+                beat_mls, beat_sslm, time_features, beat_times = compute_features(f)
+
             label_vec = np.zeros(beat_mls.shape[1],)
             segment_times = get_segment_times(f, paths.annotations_path)
 
@@ -139,9 +298,15 @@ def batch_extract_mls_and_labels(audio_files, beats_folder, annotation_folder):
                     label_vec[closest_beat] = 1.
 
             feature_list.append(beat_mls)
+            sslm_feature_list.append(beat_sslm)
+            time_feature_list.append(time_features)
             labels_list.append(label_vec)
 
-    return feature_list, labels_list, failed_tracks_idx
+            if max_tracks is not None and n_tracks > max_tracks:
+                break
+            n_tracks += 1
+
+    return feature_list, sslm_feature_list, time_feature_list, labels_list, failed_tracks_idx
 
 
 def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample=10000):
@@ -157,6 +322,7 @@ def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample
 
     if mean_vec is None:
         # subsample features
+        print("sampling")
         idx = random.sample(range(features.shape[0]), min(features.shape[0], subsample))
         temp_features = features[idx, :, :]
 
@@ -171,13 +337,14 @@ def normalize_features_per_band(features, mean_vec=None, std_vec=None, subsample
         mean_vec = np.mean(temp_features, axis=0)
         std_vec = np.std(temp_features, axis=0)
 
-    features = features - mean_vec[np.newaxis, :, np.newaxis]
-    features = features / std_vec[np.newaxis, :, np.newaxis]
+    print("modifying...")
+    features -= mean_vec[np.newaxis, :, np.newaxis]
+    features /= std_vec[np.newaxis, :, np.newaxis]
 
     return features, mean_vec, std_vec
 
 
-def prepare_batch_data(feature_list, labels_list, is_training=True):
+def prepare_batch_data(feature_list, sslm_feature_list, time_feature_list, labels_list, is_training=True):
     """
     Reads precomputed beat Mel spectrograms and slices them into context windows
     for CNN training. For the training set, subsampling is
@@ -189,20 +356,20 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
     :return: batch data in the form (n_items, n_melbands, n_context)
     """
 
-    n_preallocate = 250000
+    n_preallocate = 500000
 
     # initialize arrays for storing context windows
     data_x = np.zeros(shape=(n_preallocate, num_mel_bands, context_length), dtype=np.float32)
+    data_sslm_x = np.zeros(shape=(n_preallocate, sslm_length, sslm_length), dtype=np.float32)
+    data_time_x = np.zeros(shape=(n_preallocate, time_feature_list[0].shape[1]), dtype=np.float32)
     data_y = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     data_weight = np.zeros(shape=(n_preallocate,), dtype=np.float32)
     track_idx = np.zeros(shape=(n_preallocate,), dtype=int)
 
     feature_count = 0
     current_track = 0
-    padding_length = int(context_length / 2)
 
-    for features, labels in zip(feature_list, labels_list):
-
+    for features, sslm_features, time_features, labels in zip(feature_list, sslm_feature_list, time_feature_list, labels_list):
         print("Processed {} examples from {} tracks".format(feature_count, current_track+1))
 
         num_beats = features.shape[1]
@@ -212,6 +379,17 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
 
         labels = np.concatenate((np.zeros(padding_length), labels, np.zeros(padding_length)), axis=0)
 
+        def add_feature(idx, label, weight=1):
+            nonlocal feature_count
+            data_x[feature_count, :, :] = features[:, idx - padding_length: idx + padding_length + 1]
+            data_sslm_x[feature_count] = sslm_features[:, :, idx - padding_length]
+            data_time_x[feature_count] = time_features[idx - padding_length]
+            data_y[feature_count] = label
+            data_weight[feature_count] = weight
+            track_idx[feature_count] = current_track
+
+            feature_count += 1
+
         if is_training is True:
 
             # take all positive frames.  these are indexes into the already padded features.
@@ -220,34 +398,15 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
             for rep in range(pos_frames_oversample):
 
                 for k in positive_frames_idx:
-
-                    next_window = features[:, k - padding_length: k + padding_length + 1]
-                    next_label = 1
-                    next_weight = 1
-
-                    data_x[feature_count, :, :] = next_window
-                    data_y[feature_count] = next_label
-                    data_weight[feature_count] = next_weight
-                    track_idx[feature_count] = current_track
-
-                    feature_count += 1
+                    add_feature(k, label=1)
 
                     # apply label smearing: set labels around annotation to 1 and give them a triangular weight
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
                         # don't smear into padding.
                         if padding_length <= l < num_beats + padding_length and l != k:
-
-                            next_window = features[:, l-padding_length: l+padding_length+1]
-                            next_label = 1
                             next_weight = 1. - np.abs(l-k) / (label_smearing + 1.)
-
-                            data_x[feature_count, :, :] = next_window
-                            data_y[feature_count] = next_label
-                            data_weight[feature_count] = next_weight
-                            track_idx[feature_count] = current_track
-
-                            feature_count += 1
+                            add_feature(l, label=0.5, weight=next_weight)
 
             # take all frames in the middle between two boundaries (typical false positives)
             mid_segment_frames_idx = (positive_frames_idx[1:] + positive_frames_idx[:-1]) / 2
@@ -259,15 +418,7 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
                     for l in range(k - label_smearing, k + label_smearing + 1):
 
                         if padding_length <= l < num_beats + padding_length:
-
-                            next_window = features[:, l-padding_length: l+padding_length+1]
-
-                            data_x[feature_count, :, :] = next_window
-                            data_y[feature_count] = 0
-                            data_weight[feature_count] = 1
-                            track_idx[feature_count] = current_track
-
-                            feature_count += 1
+                            add_feature(l, label=0)
 
             # sample randomly from the remaining frames
             remaining_frames_idx = []
@@ -280,42 +431,25 @@ def prepare_batch_data(feature_list, labels_list, is_training=True):
             for k in range(num_neg_frames):
                 next_idx = random.sample(remaining_frames_idx, 1)[0]
 
-                next_window = features[:, next_idx-padding_length: next_idx+padding_length+1]
-                next_label = 0
-                next_weight = 1
-
-                data_x[feature_count, :, :] = next_window
-                data_y[feature_count] = next_label
-                data_weight[feature_count] = next_weight
-                track_idx[feature_count] = current_track
-
-                feature_count += 1
+                add_feature(next_idx, label=0)
 
         else:   # test data -> extract all context windows and keep track of track indices
             for k in range(padding_length, num_beats + padding_length):
-
-                next_window = features[:, k-padding_length: k+padding_length+1]
-                next_label = labels[k]
-                next_weight = 1
-
-                data_x[feature_count, :, :] = next_window
-                data_y[feature_count] = next_label
-                data_weight[feature_count] = next_weight
-                track_idx[feature_count] = current_track
-
-                feature_count += 1
+                add_feature(k, label=labels[k])
 
         current_track += 1
 
         if feature_count > n_preallocate:
             break
 
-    data_x = data_x[:feature_count, :, :]
+    data_x.resize((feature_count, data_x.shape[1], data_x.shape[2]))
+    data_sslm_x.resize((feature_count, data_sslm_x.shape[1], data_sslm_x.shape[2]))
+    data_time_x.resize((feature_count, data_time_x.shape[1]))
     data_y = data_y[:feature_count]
     data_weight = data_weight[:feature_count]
     track_idx = track_idx[:feature_count]
 
-    return data_x, data_y, data_weight, track_idx
+    return data_x, data_sslm_x, data_time_x, data_y, data_weight, track_idx
 
 
 def load_raw_features(file):
@@ -333,6 +467,8 @@ def load_raw_features(file):
 
 
 if __name__ == "__main__":
+    #import signal
+    #signal.signal(signal.SIGINT, debug_signal_handler)
 
     train_frame = pd.read_csv('../Data/train_tracks.txt', header=None)
     test_frame = pd.read_csv('../Data/test_tracks.txt', header=None)
@@ -342,13 +478,13 @@ if __name__ == "__main__":
 
     print("Extracting MLS features")
 
-    train_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,
-                                                                                  paths.beats_path,
-                                                                                  paths.annotations_path)
+    train_features, train_sslm_features, train_time_features, train_labels, train_failed_idx = batch_extract_mls_and_labels(train_files,
+            paths.beats_path,
+            paths.annotations_path)
 
-    test_features, test_labels, test_failed_idx = batch_extract_mls_and_labels(test_files,
-                                                                               paths.beats_path,
-                                                                               paths.annotations_path)
+    test_features, test_sslm_features, test_time_features, test_labels, test_failed_idx = batch_extract_mls_and_labels(test_files,
+            paths.beats_path,
+            paths.annotations_path)
 
     print("Extracted features for {} training and {} test tracks".format(len(train_features), len(test_features)))
 
@@ -360,21 +496,22 @@ if __name__ == "__main__":
         del test_files[i]
 
     with open('../Data/rawFeatures.pickle', 'wb') as f:
-        pickle.dump((train_features, train_labels, test_features, test_labels), f)
+        pickle.dump((train_features, train_sslm_features, train_labels, test_features, test_sslm_features, test_labels), f)
 
     # train_features, train_labels, test_features, test_labels = load_raw_features('../Data/rawFeatures.pickle')
 
-    train_x, train_y, train_weights, train_idx = prepare_batch_data(train_features, train_labels, is_training=True)
-    test_x, test_y, test_weights, test_idx = prepare_batch_data(test_features, test_labels, is_training=False)
+    train_x, train_sslm_x, train_time_x, train_y, train_weights, train_idx = prepare_batch_data(train_features, train_sslm_features, train_time_features,  train_labels, is_training=True)
+    test_x, test_sslm_x, test_time_x, test_y, test_weights, test_idx = prepare_batch_data(test_features, test_sslm_features, test_time_features, test_labels, is_training=False)
 
+    print("normalizing features")
     train_x, mean_vec, std_vec = normalize_features_per_band(train_x)
     test_x, mean_vec, std_vec = normalize_features_per_band(test_x, mean_vec, std_vec)
 
     print("Prepared {} training items and {} test items".format(train_x.shape[0], test_x.shape[0]))
 
     # store normalized features for CNN training
-    np.savez('../Data/trainDataNormalized.npz', train_x=train_x, train_y=train_y, train_weights=train_weights)
-    np.savez('../Data/testDataNormalized.npz', test_x=test_x, test_y=test_y, test_weights=test_weights)
+    np.savez('../Data/trainDataNormalized.npz', train_x=train_x, train_sslm_x=train_sslm_x, train_time_x=train_time_x, train_y=train_y, train_weights=train_weights)
+    np.savez('../Data/testDataNormalized.npz', test_x=test_x, test_sslm_x=test_sslm_x, test_time_x=test_time_x, test_y=test_y, test_weights=test_weights)
     np.savez('../Data/normalization.npz', mean_vec=mean_vec, std_vec=std_vec)
 
     # store file lists and index mapping to training and test data

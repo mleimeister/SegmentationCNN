@@ -12,11 +12,20 @@ import numpy as np
 from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
+import tensorflow.keras.layers
+from tensorflow.keras.models import Model
+
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
 from keras.callbacks import EarlyStopping
 from keras.optimizers import SGD
 
-np.random.seed(1234)  # for reproducibility
+np.random.seed(1235)  # for reproducibility
 
+import parameters
 
 def load_training_data(dataset):
     """
@@ -30,12 +39,8 @@ def load_training_data(dataset):
     :return train_weights (n_items x 1)
     """
 
-    data = np.load(dataset)
-    train_x = data['train_x']
-    train_y = data['train_y']
-    train_weights = data['train_weights']
-
-    return train_x, train_y, train_weights
+    data = np.load(dataset, mmap_mode='r')
+    return data['train_x'], data['train_sslm_x'], data['train_time_x'], data['train_y'], data['train_weights']
 
 
 def load_test_data(dataset):
@@ -50,34 +55,70 @@ def load_test_data(dataset):
     :return test_weights (n_items x 1)
     """
 
-    data = np.load(dataset)
-    test_x = data['test_x']
-    test_y = data['test_y']
-    test_weights = data['test_weights']
-
-    return test_x, test_y, test_weights
+    data = np.load(dataset, mmap_mode='r')
+    return data['test_x'], data['test_sslm_x'], data['test_time_x'], data['test_y'], data['test_weights']
 
 
-def build_model(img_rows, img_cols):
+def build_model(mls_rows, mls_cols, sslm_shape):
+    inputs = []
+    merged_input = []
 
-    model = Sequential()
+    if 'mls' in parameters.training_features:
+        mls_input = layers.Input(shape=(mls_rows, mls_cols, 1), name='mls_input')
+        mls = layers.Conv2D(16, (6, 8), activation='relu', name='mls_conv')(mls_input)
+        mls = layers.MaxPooling2D(pool_size=(3, 6), name='mls_maxpool')(mls)
+        merged_input.append(mls)
+        inputs.append(mls_input)
 
-    model.add(Convolution2D(32, (6, 8), input_shape=(img_rows, img_cols, 1)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(5, 2)))
-    model.add(Convolution2D(64, (4, 6)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.5))
-    model.add(Flatten())
-    model.add(Dense(256))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
-    model.add(Dense(1))
-    model.add(Activation('sigmoid'))
+    if 'sslm' in parameters.training_features:
+        sslm_input = layers.Input(shape=(sslm_shape, sslm_shape, 1), name='sslm_input')
+        sslm = layers.Conv2D(16, (8, 8), activation='relu', name='sslm_conv')(sslm_input)
+        sslm = layers.MaxPooling2D(pool_size=(6, 6), name='sslm_maxpool')(sslm)
 
-    return model
+        merged_input.append(sslm)
+        inputs.append(sslm_input)
 
+    if len(merged_input) > 1:
+        merged = layers.Concatenate(axis=1, name='mls_sslm_concat')(merged_input)
+    else:
+        merged = merged_input[0]
+
+    merged = layers.Conv2D(64, (6, 3), activation='relu', name='concat_conv')(merged)
+    merged = layers.Dropout(0.5, name='concat_dropout')(merged)
+
+    merged = layers.Flatten()(merged)
+
+    merged = layers.Dense(256, activation='relu', name='final_dense')(merged)
+    merged = layers.Dropout(0.5, name='final_dropout')(merged)
+
+    final_dense_input = [merged]
+    if 'beat_numbers' in parameters.training_features:
+        time_input = layers.Input(shape=(4,), name='time_input')
+        time = layers.Dense(1, activation='relu', name='time_dense')(time_input)
+        final_dense_input.append(time)
+        inputs.append(time_input)
+
+    if len(final_dense_input) > 1:
+        merged = layers.Concatenate(name='final_concat')(final_dense_input)
+    else:
+        merged = final_dense_input[0]
+
+    merged = layers.Dense(1, activation='sigmoid', name='final_sigmoid')(merged)
+
+    return Model(inputs=inputs, outputs = merged)
+
+def make_input(mls, sslm, time):
+    input = []
+    if 'mls' in parameters.training_features:
+        input.append(mls)
+
+    if 'sslm' in parameters.training_features:
+        input.append(sslm)
+
+    if 'beat_numbers' in parameters.training_features:
+        input.append(time)
+
+    return input
 
 def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weights_file=None):
     """
@@ -90,23 +131,27 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     """
 
     print('loading training data...')
-    X_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
+    X_train, x_sslm_train, x_time_train, y_train, w_train = load_training_data('../Data/trainDataNormalized.npz')
 
     print('training data size:')
     print(X_train.shape)
 
+    img_rows = X_train.shape[1]
+    img_cols = X_train.shape[2]
+    model = build_model(img_rows, img_cols, x_sslm_train.shape[1])
+
     p = np.random.permutation(X_train.shape[0])
+
     X_train = X_train[p, :, :]
+    x_sslm_train = x_sslm_train[p, :, :]
+    x_time_train = x_time_train[p]
     y_train = y_train[p]
     w_train = w_train[p]
 
     X_train = X_train.astype('float32')
     X_train = np.expand_dims(X_train, 3)
+    x_sslm_train = np.expand_dims(x_sslm_train, 3)
 
-    img_rows = X_train.shape[1]
-    img_cols = X_train.shape[2]
-
-    model = build_model(img_rows, img_cols)
 
     if weights_file is not None:
         model.load_weights(weights_file)
@@ -114,24 +159,26 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
     sgd = SGD(lr=0.05, decay=1e-4, momentum=0.9, nesterov=True)
     model.compile(loss='binary_crossentropy', optimizer=sgd)
 
-    #early_stopping = EarlyStopping(monitor='val_loss', patience=5)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=15)
 
     print('train model...')
-    model.fit(X_train, y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
-              verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[])
+
+    model.fit(x=make_input(X_train, x_sslm_train, x_time_train), y=y_train, batch_size=batch_size, epochs=nb_epoch, shuffle=True,
+              verbose=1, validation_split=0.1, sample_weight=w_train, callbacks=[early_stopping])
 
     print('load test data...')
-    X_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
+    X_test, x_sslm_test, x_time_test, y_test, w_test = load_test_data('../Data/testDataNormalized.npz')
     X_test = X_test.astype('float32')
     X_test = np.expand_dims(X_test, 3)
+    x_sslm_test = np.expand_dims(x_sslm_test, 3)
 
     print('predict test data...')
-    preds = model.predict(X_test, batch_size=1, verbose=1)
+    preds = model.predict(make_input(X_test, x_sslm_test, x_time_test), batch_size=1, verbose=1)
 
     print('saving results...')
     np.save('../Data/predsTestTracks' + save_ext + '.npy', preds)
 
-    score = model.evaluate(X_test, y_test, verbose=1)
+    score = model.evaluate(make_input(X_test, x_sslm_test, x_time_test), y_test, verbose=1)
     print('Test score:', score)
 
     # save model
@@ -139,4 +186,4 @@ def train_model(batch_size=128, nb_epoch=100, save_ext='_100epochs_lr005', weigh
 
 
 if __name__ == "__main__":
-    train_model()
+    train_model(nb_epoch=200)
